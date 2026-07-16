@@ -1,5 +1,7 @@
-/* Service worker — cache do app shell para funcionar offline */
-const CACHE = 'gestao-op-v2';
+/* Service worker — cache do app shell para funcionar offline.
+   Estratégia: rede primeiro (ignorando o cache HTTP, para atualizações
+   chegarem na hora); se estiver offline, usa a cópia guardada. */
+const CACHE = 'gestao-op-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -13,7 +15,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  e.waitUntil(
+    caches.open(CACHE).then(c =>
+      c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))
+    )
+  );
   self.skipWaiting();
 });
 
@@ -28,7 +34,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then(res => {
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone));
