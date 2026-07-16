@@ -235,11 +235,41 @@ const DB = (() => {
     return meses;
   }
 
+  // ---------- Backup ----------
+  function exportar() {
+    return JSON.stringify({
+      app: 'gestao-op',
+      versao: 1,
+      exportado_em: now(),
+      contas: data.contas,
+      historico: data.historico,
+    }, null, 2);
+  }
+
+  function importar(texto) {
+    let obj;
+    try { obj = JSON.parse(texto); } catch (e) {
+      throw new Error('Arquivo inválido: não é um backup do Gestão Op.');
+    }
+    if (!obj || obj.app !== 'gestao-op' || !Array.isArray(obj.contas) || !Array.isArray(obj.historico))
+      throw new Error('Arquivo inválido: não é um backup do Gestão Op.');
+    if (obj.contas.some(c => !c.id || !c.username))
+      throw new Error('Backup corrompido: contas sem id/username.');
+    data = { contas: obj.contas, historico: obj.historico };
+    persist();
+    return { contas: data.contas.length, eventos: data.historico.length };
+  }
+
+  function totais() {
+    return { contas: data.contas.length, eventos: data.historico.length };
+  }
+
   return {
     STATUS,
     criarConta, atualizarConta, alterarStatus, registrarVenda, excluirConta,
     getConta, listarContas, historicoDaConta,
     indicadores, lucroMensal,
+    exportar, importar, totais,
   };
 })();
 

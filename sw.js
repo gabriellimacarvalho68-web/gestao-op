@@ -1,5 +1,5 @@
 /* Service worker — cache do app shell para funcionar offline */
-const CACHE = 'gestao-op-v1';
+const CACHE = 'gestao-op-v2';
 const ASSETS = [
   './',
   './index.html',

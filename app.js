@@ -39,6 +39,7 @@ function router() {
   if (hash === '#/' || hash === '#') renderDashboard();
   else if (parts[0] === 'contas') renderLista();
   else if (parts[0] === 'nova') renderCadastro();
+  else if (parts[0] === 'backup') renderBackup();
   else if (parts[0] === 'conta' && parts[1]) renderDetalhes(parts[1]);
   else if (parts[0] === 'venda' && parts[1]) renderVenda(parts[1]);
   else renderDashboard();
@@ -96,6 +97,9 @@ function renderDashboard() {
           <h1>Gestão Operações</h1>
           <div class="subtitle">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
         </div>
+        <a class="btn-icon" href="#/backup" aria-label="Backup dos dados">
+          <svg viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+        </a>
       </div>
     </div>
 
@@ -598,6 +602,99 @@ function renderVenda(id) {
       $err.textContent = err.message;
       $err.classList.add('show');
     }
+  });
+}
+
+/* ============================================================
+   BACKUP  (#/backup)
+   ============================================================ */
+function renderBackup() {
+  const t = DB.totais();
+  const ultimo = localStorage.getItem('gestao-op-ultimo-backup');
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Voltar
+    </a>
+    <div class="page-head">
+      <h1>Backup</h1>
+      <div class="subtitle">Seus dados ficam salvos apenas neste aparelho. Exporte um backup de vez em quando para não perder nada.</div>
+    </div>
+
+    <div class="card detail-rows">
+      <div class="detail-row"><span class="k">Contas</span><span class="v">${t.contas}</span></div>
+      <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos}</span></div>
+      <div class="detail-row"><span class="k">Último backup</span><span class="v">${ultimo ? fmtDataHora(ultimo) : 'Nunca'}</span></div>
+    </div>
+
+    <h2>Salvar backup</h2>
+    <div class="card" style="margin-bottom:10px;">
+      <p style="font-size:13px;color:var(--ink-2);margin-bottom:12px;">
+        Gera um arquivo com todas as contas e o histórico. No iPhone, escolha
+        <strong>Salvar em Arquivos</strong> (iCloud) ou envie para o WhatsApp/email.
+      </p>
+      <button class="btn btn-primary" id="btn-exportar">Exportar backup</button>
+    </div>
+
+    <h2>Restaurar backup</h2>
+    <div class="card">
+      <p style="font-size:13px;color:var(--ink-2);margin-bottom:12px;">
+        Escolha um arquivo de backup exportado antes.
+        <strong>Atenção:</strong> substitui todos os dados atuais do app.
+      </p>
+      <input type="file" id="arquivo-backup" accept=".json,application/json,text/plain" style="display:none;">
+      <button class="btn btn-secondary" id="btn-importar">Importar backup</button>
+    </div>
+  `;
+
+  document.getElementById('btn-exportar').addEventListener('click', async () => {
+    const json = DB.exportar();
+    const nome = 'gestao-op-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+    const arquivo = new File([json], nome, { type: 'application/json' });
+    let ok = false;
+    // iOS: folha de compartilhamento (Arquivos, WhatsApp, email…)
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try {
+        await navigator.share({ files: [arquivo], title: 'Backup Gestão Op' });
+        ok = true;
+      } catch (e) {
+        if (e.name === 'AbortError') return; // usuário cancelou
+      }
+    }
+    if (!ok) {
+      // Fallback: download direto
+      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nome;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+    localStorage.setItem('gestao-op-ultimo-backup', new Date().toISOString());
+    toast('Backup exportado ✓');
+    renderBackup();
+  });
+
+  const $arquivo = document.getElementById('arquivo-backup');
+  document.getElementById('btn-importar').addEventListener('click', () => $arquivo.click());
+  $arquivo.addEventListener('change', () => {
+    const f = $arquivo.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        if (!confirm('Restaurar este backup? Os dados atuais do app serão substituídos.')) return;
+        const r = DB.importar(reader.result);
+        toast(`Backup restaurado: ${r.contas} contas ✓`);
+        renderBackup();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    reader.readAsText(f);
   });
 }
 

@@ -32,8 +32,8 @@ No iPhone:
 
 - Os dados ficam salvos **apenas no dispositivo** (localStorage do navegador/app).
 - Não limpe os dados do Safari nas configurações do iPhone, ou os registros serão apagados.
+- **Backup**: toque no ícone de nuvem no Dashboard → **Exportar backup** para salvar um arquivo com tudo (em Arquivos/iCloud, WhatsApp, email). Para recuperar, use **Importar backup** na mesma tela.
 - As senhas das contas são armazenadas **sem criptografia** no dispositivo — o app é de uso pessoal; não compartilhe o aparelho desbloqueado.
-- Backup em nuvem e exportação estão na lista de funcionalidades futuras do PRD.
 
 ## Estrutura
 
