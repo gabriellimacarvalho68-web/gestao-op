@@ -502,6 +502,7 @@ function renderDetalhes(id) {
 
     <div style="margin-top:24px;">
       ${!vendida ? `<a class="btn btn-success" href="#/venda/${c.id}">Registrar venda</a>` : ''}
+      ${vendida ? `<button class="btn btn-secondary" id="btn-cancelar-venda">Cancelar venda</button>` : ''}
       <button class="btn btn-danger-ghost" id="btn-excluir">Excluir conta</button>
     </div>
   `;
@@ -514,6 +515,20 @@ function renderDetalhes(id) {
       visivel = !visivel;
       document.getElementById('senha-v').textContent = visivel ? c.senha : '••••••••';
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
+    });
+  }
+
+  // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estoque
+  const $cancelar = document.getElementById('btn-cancelar-venda');
+  if ($cancelar) {
+    $cancelar.addEventListener('click', () => {
+      if (confirm(`Cancelar a venda de @${c.username.replace(/^@/, '')}? O lucro será zerado e a conta volta para "Comprada".`)) {
+        try {
+          DB.cancelarVenda(id);
+          toast('Venda cancelada ✓');
+          renderDetalhes(id);
+        } catch (err) { toast(err.message); }
+      }
     });
   }
 
@@ -1003,6 +1018,7 @@ function renderFarmDetalhes(id) {
 
     <div style="margin-top:24px;">
       ${!vendida ? `<a class="btn btn-success" href="#/farm/venda/${c.id}">Registrar venda</a>` : ''}
+      ${vendida ? `<button class="btn btn-secondary" id="btn-cancelar-venda">Cancelar venda</button>` : ''}
       <button class="btn btn-danger-ghost" id="btn-excluir">Excluir conta</button>
     </div>
   `;
@@ -1015,6 +1031,20 @@ function renderFarmDetalhes(id) {
       visivel = !visivel;
       document.getElementById('senha-v').textContent = visivel ? c.senha : '••••••••';
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
+    });
+  }
+
+  // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estágio padrão
+  const $cancelar = document.getElementById('btn-cancelar-venda');
+  if ($cancelar) {
+    $cancelar.addEventListener('click', () => {
+      if (confirm(`Cancelar a venda de @${c.username.replace(/^@/, '')}? O lucro será zerado e a conta volta para "Crescendo".`)) {
+        try {
+          DB.cancelarVendaFarm(id);
+          toast('Venda cancelada ✓');
+          renderFarmDetalhes(id);
+        } catch (err) { toast(err.message); }
+      }
     });
   }
 

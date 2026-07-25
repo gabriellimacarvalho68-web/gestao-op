@@ -191,6 +191,26 @@ const DB = (() => {
     return conta;
   }
 
+  // Desfaz a venda (ex.: comprador cancelou): zera financeiro e volta ao estoque
+  function cancelarVenda(id) {
+    const conta = getConta(id);
+    if (!conta) throw new Error('Conta não encontrada.');
+    if (conta.preco_venda == null) throw new Error('Esta conta não está vendida.');
+    const valorAnterior = conta.preco_venda;
+    const statusAnterior = conta.status;
+    conta.preco_venda = null;
+    conta.data_venda = null;
+    conta.lucro = 0;
+    conta.status = 'Comprada';
+    conta.atualizado_em = now();
+    addHistorico(id, 'Venda cancelada', `Venda de ${fmtBRL(valorAnterior)} desfeita. Conta voltou ao estoque.`);
+    if (statusAnterior !== 'Comprada') {
+      addHistorico(id, 'Status alterado para Comprada', `De ${statusAnterior} para Comprada.`);
+    }
+    persist();
+    return conta;
+  }
+
   function excluirConta(id) {
     data.contas = data.contas.filter(c => c.id !== id);
     data.historico = data.historico.filter(h => h.conta_id !== id);
@@ -319,6 +339,26 @@ const DB = (() => {
     let desc = `Venda de ${fmtBRL(f.preco_venda)} — lucro de ${fmtBRL(f.lucro)}.`;
     if (observacoes && observacoes.trim()) desc += ` Obs.: ${observacoes.trim()}`;
     addFarmHistorico(id, 'Venda registrada', desc);
+    persist();
+    return f;
+  }
+
+  // Desfaz a venda de uma conta em farm: zera financeiro e volta o estágio ao padrão
+  function cancelarVendaFarm(id) {
+    const f = getFarm(id);
+    if (!f) throw new Error('Conta não encontrada.');
+    if (f.preco_venda == null) throw new Error('Esta conta não está vendida.');
+    const valorAnterior = f.preco_venda;
+    const statusAnterior = f.status;
+    f.preco_venda = null;
+    f.data_venda = null;
+    f.lucro = 0;
+    f.status = 'Crescendo';
+    f.atualizado_em = now();
+    addFarmHistorico(id, 'Venda cancelada', `Venda de ${fmtBRL(valorAnterior)} desfeita.`);
+    if (statusAnterior !== 'Crescendo') {
+      addFarmHistorico(id, 'Estágio alterado para Crescendo', `De ${statusAnterior} para Crescendo.`);
+    }
     persist();
     return f;
   }
@@ -469,10 +509,10 @@ const DB = (() => {
 
   return {
     STATUS, FARM_STATUS,
-    criarConta, atualizarConta, alterarStatus, registrarVenda, excluirConta,
+    criarConta, atualizarConta, alterarStatus, registrarVenda, cancelarVenda, excluirConta,
     getConta, listarContas, historicoDaConta,
     indicadores, lucroMensal,
-    criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, excluirFarm,
+    criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
     exportar, importar, totais,
   };
