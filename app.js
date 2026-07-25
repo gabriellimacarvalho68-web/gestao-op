@@ -60,7 +60,8 @@ function router() {
   // Tab ativa
   const tab = parts[0] === 'contas' ? 'contas'
     : (parts[0] === 'nova' ? 'nova'
-    : (parts[0] === 'farm' ? 'farm' : 'dashboard'));
+    : (parts[0] === 'farm' ? 'farm'
+    : (parts[0] === 'backup' ? 'backup' : 'dashboard')));
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -128,15 +129,8 @@ function renderDashboard() {
 
   $view.innerHTML = `
     <div class="page-head">
-      <div class="page-head-row">
-        <div>
-          <h1>Gestão Operações</h1>
-          <div class="subtitle">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
-        </div>
-        <a class="btn-icon" href="#/backup" aria-label="Backup dos dados">
-          <svg viewBox="0 0 24 24"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-        </a>
-      </div>
+      <h1>Gestão Operações</h1>
+      <div class="subtitle">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
     </div>
 
     ${searchHTML('dash-search', 'Pesquisar username ou fornecedor')}
