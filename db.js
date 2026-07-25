@@ -9,6 +9,9 @@ const DB = (() => {
 
   const STATUS = ['Comprada', 'Vendida', 'Shop', 'Monetizada', 'Ambos', 'Nada'];
 
+  // Estágios do farm (módulo independente de contas)
+  const FARM_STATUS = ['Crescendo', 'Shop aceito', 'Monetizada', 'Sem nada', 'Vendida'];
+
   function uuid() {
     if (crypto.randomUUID) return crypto.randomUUID();
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -20,9 +23,17 @@ const DB = (() => {
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        // Retrocompatível: dados antigos não têm as chaves do farm
+        obj.contas = obj.contas || [];
+        obj.historico = obj.historico || [];
+        obj.farm = obj.farm || [];
+        obj.farm_historico = obj.farm_historico || [];
+        return obj;
+      }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [] };
+    return { contas: [], historico: [], farm: [], farm_historico: [] };
   }
 
   let data = load();
@@ -45,10 +56,35 @@ const DB = (() => {
     });
   }
 
+  function addFarmHistorico(farmId, evento, descricao) {
+    data.farm_historico.push({
+      id: uuid(),
+      farm_id: farmId,
+      evento,
+      descricao: descricao || '',
+      criado_em: now(),
+    });
+  }
+
   // RN1 / RN2 — lucro = venda − compra; R$ 0,00 enquanto não vendida
   function calcLucro(conta) {
     if (conta.preco_venda == null) return 0;
     return Number(conta.preco_venda) - Number(conta.preco_compra || 0);
+  }
+
+  // Farm — lucro = venda − custo investido; R$ 0,00 enquanto não vendida
+  function calcLucroFarm(f) {
+    if (f.preco_venda == null) return 0;
+    return Number(f.preco_venda) - Number(f.custo || 0);
+  }
+
+  // Username único dentro do farm (independente das contas de compra/venda)
+  function farmUsernameExiste(username, ignorarId) {
+    const norm = String(username).trim().replace(/^@/, '').toLowerCase();
+    return data.farm.some(f =>
+      f.id !== ignorarId &&
+      f.username.trim().replace(/^@/, '').toLowerCase() === norm
+    );
   }
 
   // RN4 — username único (ignora maiúsculas/minúsculas e @)
@@ -188,6 +224,161 @@ const DB = (() => {
       .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
   }
 
+  // ============================================================
+  //   FARM — contas em criação/aquecimento (módulo independente)
+  // ============================================================
+  function getFarm(id) {
+    return data.farm.find(f => f.id === id) || null;
+  }
+
+  function criarFarm({ username, plataforma, email, senha, custo, status, observacoes, data_inicio }) {
+    username = String(username || '').trim();
+    plataforma = String(plataforma || '').trim();
+    if (!username) throw new Error('Username é obrigatório.');
+    if (custo !== '' && custo != null && isNaN(Number(custo)))
+      throw new Error('Custo inválido.');
+    if (farmUsernameExiste(username)) throw new Error('Já existe uma conta em farm com esse username.');
+
+    const f = {
+      id: uuid(),
+      username,
+      plataforma,
+      email: String(email || '').trim(),
+      senha: String(senha || ''),
+      custo: custo == null || custo === '' ? 0 : Number(custo),
+      preco_venda: null,
+      lucro: 0,
+      status: FARM_STATUS.includes(status) ? status : 'Crescendo',
+      observacoes: String(observacoes || '').trim(),
+      data_inicio: data_inicio || now(),
+      data_venda: null,
+      criado_em: now(),
+      atualizado_em: now(),
+    };
+    data.farm.push(f);
+    addFarmHistorico(f.id, 'Conta criada', `Conta @${f.username} adicionada ao farm${f.plataforma ? ' — ' + f.plataforma : ''}.`);
+    if (f.custo > 0) {
+      addFarmHistorico(f.id, 'Custo registrado', `Investimento inicial de ${fmtBRL(f.custo)}.`);
+    }
+    persist();
+    return f;
+  }
+
+  function atualizarFarm(id, campos) {
+    const f = getFarm(id);
+    if (!f) throw new Error('Conta não encontrada.');
+    if (campos.username != null) {
+      const u = String(campos.username).trim();
+      if (!u) throw new Error('Username é obrigatório.');
+      if (farmUsernameExiste(u, id)) throw new Error('Já existe uma conta em farm com esse username.');
+      f.username = u;
+    }
+    ['plataforma', 'email', 'senha', 'observacoes'].forEach(k => {
+      if (campos[k] != null) f[k] = String(campos[k]).trim();
+    });
+    if (campos.custo != null && campos.custo !== '' && !isNaN(Number(campos.custo))) {
+      f.custo = Number(campos.custo);
+      f.lucro = calcLucroFarm(f);
+    }
+    f.atualizado_em = now();
+    persist();
+    return f;
+  }
+
+  // Alteração de estágio gera histórico
+  function alterarStatusFarm(id, novoStatus) {
+    const f = getFarm(id);
+    if (!f) throw new Error('Conta não encontrada.');
+    if (!FARM_STATUS.includes(novoStatus)) throw new Error('Estágio inválido.');
+    if (f.status === novoStatus) return f;
+    const anterior = f.status;
+    f.status = novoStatus;
+    f.atualizado_em = now();
+    addFarmHistorico(id, `Estágio alterado para ${novoStatus}`, `De ${anterior} para ${novoStatus}.`);
+    persist();
+    return f;
+  }
+
+  // Uma única venda; lucro = venda − custo
+  function registrarVendaFarm(id, { preco_venda, data_venda, observacoes }) {
+    const f = getFarm(id);
+    if (!f) throw new Error('Conta não encontrada.');
+    if (f.preco_venda != null) throw new Error('Esta conta já foi vendida.');
+    if (preco_venda == null || preco_venda === '' || isNaN(Number(preco_venda)))
+      throw new Error('Valor da venda é obrigatório.');
+
+    f.preco_venda = Number(preco_venda);
+    f.lucro = calcLucroFarm(f);
+    f.data_venda = data_venda || now();
+    f.atualizado_em = now();
+    const anterior = f.status;
+    f.status = 'Vendida';
+    if (anterior !== 'Vendida') {
+      addFarmHistorico(id, 'Estágio alterado para Vendida', `De ${anterior} para Vendida.`);
+    }
+    let desc = `Venda de ${fmtBRL(f.preco_venda)} — lucro de ${fmtBRL(f.lucro)}.`;
+    if (observacoes && observacoes.trim()) desc += ` Obs.: ${observacoes.trim()}`;
+    addFarmHistorico(id, 'Venda registrada', desc);
+    persist();
+    return f;
+  }
+
+  function excluirFarm(id) {
+    data.farm = data.farm.filter(f => f.id !== id);
+    data.farm_historico = data.farm_historico.filter(h => h.farm_id !== id);
+    persist();
+  }
+
+  function listarFarm({ busca, status, ordenar } = {}) {
+    let lista = [...data.farm];
+    if (busca && busca.trim()) {
+      const q = busca.trim().toLowerCase();
+      lista = lista.filter(f =>
+        f.username.toLowerCase().includes(q) ||
+        (f.plataforma || '').toLowerCase().includes(q)
+      );
+    }
+    if (status && status !== 'Todas') {
+      lista = lista.filter(f => f.status === status);
+    }
+    switch (ordenar) {
+      case 'antiga':       lista.sort((a, b) => a.criado_em.localeCompare(b.criado_em)); break;
+      case 'maior-lucro':  lista.sort((a, b) => b.lucro - a.lucro); break;
+      case 'menor-lucro':  lista.sort((a, b) => a.lucro - b.lucro); break;
+      default:             lista.sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+    }
+    return lista;
+  }
+
+  function historicoDoFarm(id) {
+    return data.farm_historico
+      .filter(h => h.farm_id === id)
+      .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  }
+
+  function indicadoresFarm() {
+    const farm = data.farm;
+    const vendidas = farm.filter(f => f.preco_venda != null);
+    const ativas = farm.filter(f => f.status !== 'Vendida');
+    const investido = farm.reduce((s, f) => s + Number(f.custo || 0), 0);
+    const receita = vendidas.reduce((s, f) => s + Number(f.preco_venda || 0), 0);
+    const lucro = vendidas.reduce((s, f) => s + Number(f.lucro || 0), 0);
+
+    const porEstagio = {};
+    FARM_STATUS.forEach(s => { porEstagio[s] = 0; });
+    farm.forEach(f => { if (porEstagio[f.status] != null) porEstagio[f.status]++; });
+
+    return {
+      total: farm.length,
+      ativas: ativas.length,
+      vendidas: vendidas.length,
+      investido,
+      receita,
+      lucro,
+      porEstagio,
+    };
+  }
+
   // ---------- Indicadores do dashboard ----------
   function indicadores() {
     const contas = data.contas;
@@ -239,10 +430,12 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 1,
+      versao: 2,
       exportado_em: now(),
       contas: data.contas,
       historico: data.historico,
+      farm: data.farm,
+      farm_historico: data.farm_historico,
     }, null, 2);
   }
 
@@ -255,20 +448,32 @@ const DB = (() => {
       throw new Error('Arquivo inválido: não é um backup do Gestão Op.');
     if (obj.contas.some(c => !c.id || !c.username))
       throw new Error('Backup corrompido: contas sem id/username.');
-    data = { contas: obj.contas, historico: obj.historico };
+    // Farm: opcional (retrocompatível com backups da versão 1)
+    const farm = Array.isArray(obj.farm) ? obj.farm : [];
+    const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
+    if (farm.some(f => !f.id || !f.username))
+      throw new Error('Backup corrompido: farm sem id/username.');
+    data = { contas: obj.contas, historico: obj.historico, farm, farm_historico: farmHist };
     persist();
-    return { contas: data.contas.length, eventos: data.historico.length };
+    return { contas: data.contas.length, eventos: data.historico.length, farm: data.farm.length };
   }
 
   function totais() {
-    return { contas: data.contas.length, eventos: data.historico.length };
+    return {
+      contas: data.contas.length,
+      eventos: data.historico.length,
+      farm: data.farm.length,
+      farmEventos: data.farm_historico.length,
+    };
   }
 
   return {
-    STATUS,
+    STATUS, FARM_STATUS,
     criarConta, atualizarConta, alterarStatus, registrarVenda, excluirConta,
     getConta, listarContas, historicoDaConta,
     indicadores, lucroMensal,
+    criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, excluirFarm,
+    getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
     exportar, importar, totais,
   };
 })();

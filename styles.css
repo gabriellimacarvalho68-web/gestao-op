@@ -164,6 +164,10 @@ h2 { font-size: 17px; font-weight: 600; color: var(--ink); margin: 24px 0 10px; 
 .badge.Monetizada { background: #F1EAFE; color: #6C3FD1; }
 .badge.Ambos      { background: #E0F4F6; color: #00697A; }
 .badge.Nada       { background: #EFEFF1; color: var(--ink-2); }
+/* Estágios do farm */
+.badge.Crescendo  { background: #E3F6E9; color: #1F8B4C; }
+.badge.ShopAceito { background: #FFF3E0; color: #B26A00; }
+.badge.SemNada    { background: #EFEFF1; color: var(--ink-2); }
 
 /* ---------- Formulários ---------- */
 .form-group { margin-bottom: 14px; }

@@ -9,6 +9,7 @@ const $backdrop = document.getElementById('sheet-backdrop');
 
 // Estado da lista (persiste enquanto navega)
 const listaState = { busca: '', status: 'Todas', ordenar: 'recente' };
+const farmListaState = { busca: '', status: 'Todas', ordenar: 'recente' };
 
 function esc(s) {
   return String(s ?? '')
@@ -28,6 +29,11 @@ function lucroClass(conta) {
   return conta.lucro >= 0 ? 'pos' : 'neg';
 }
 
+// Classe CSS de badge sem espaços (ex.: "Shop aceito" -> "ShopAceito")
+function badgeSlug(status) {
+  return String(status || '').replace(/\s+/g, '');
+}
+
 /* ============================================================
    ROTEADOR
    ============================================================ */
@@ -42,10 +48,19 @@ function router() {
   else if (parts[0] === 'backup') renderBackup();
   else if (parts[0] === 'conta' && parts[1]) renderDetalhes(parts[1]);
   else if (parts[0] === 'venda' && parts[1]) renderVenda(parts[1]);
+  else if (parts[0] === 'farm') {
+    if (parts[1] === 'lista') renderFarmLista();
+    else if (parts[1] === 'nova') renderFarmCadastro();
+    else if (parts[1] === 'conta' && parts[2]) renderFarmDetalhes(parts[2]);
+    else if (parts[1] === 'venda' && parts[2]) renderFarmVenda(parts[2]);
+    else renderFarmDashboard();
+  }
   else renderDashboard();
 
   // Tab ativa
-  const tab = parts[0] === 'contas' ? 'contas' : (parts[0] === 'nova' ? 'nova' : 'dashboard');
+  const tab = parts[0] === 'contas' ? 'contas'
+    : (parts[0] === 'nova' ? 'nova'
+    : (parts[0] === 'farm' ? 'farm' : 'dashboard'));
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -71,6 +86,27 @@ function contaItemHTML(c) {
       <div class="fin">
         <div class="lucro ${lucroClass(c)}">${lucroTxt}</div>
         <div class="valores">C: ${fmtBRL(c.preco_compra)}${c.preco_venda != null ? ' · V: ' + fmtBRL(c.preco_venda) : ''}</div>
+      </div>
+    </a>`;
+}
+
+function farmItemHTML(f) {
+  const inicial = f.username.replace(/^@/, '').charAt(0) || '?';
+  const finTxt = f.preco_venda == null ? fmtBRL(f.custo) : fmtBRL(f.lucro);
+  const finLabel = f.preco_venda == null
+    ? `Custo`
+    : `V: ${fmtBRL(f.preco_venda)}`;
+  return `
+    <a class="conta-item" href="#/farm/conta/${f.id}">
+      <div class="avatar">${esc(inicial)}</div>
+      <div class="info">
+        <div class="username">@${esc(f.username.replace(/^@/, ''))}</div>
+        <div class="meta">${esc(f.plataforma || 'Sem plataforma')}</div>
+        <span class="badge ${esc(badgeSlug(f.status))}">${esc(f.status)}</span>
+      </div>
+      <div class="fin">
+        <div class="lucro ${f.preco_venda == null ? '' : lucroClass(f)}">${finTxt}</div>
+        <div class="valores">${finLabel}</div>
       </div>
     </a>`;
 }
@@ -624,7 +660,8 @@ function renderBackup() {
 
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Contas</span><span class="v">${t.contas}</span></div>
-      <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos}</span></div>
+      <div class="detail-row"><span class="k">Contas em farm</span><span class="v">${t.farm}</span></div>
+      <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos + t.farmEventos}</span></div>
       <div class="detail-row"><span class="k">Último backup</span><span class="v">${ultimo ? fmtDataHora(ultimo) : 'Nunca'}</span></div>
     </div>
 
@@ -695,6 +732,419 @@ function renderBackup() {
       }
     };
     reader.readAsText(f);
+  });
+}
+
+/* ============================================================
+   FARM — DASHBOARD  (#/farm)
+   ============================================================ */
+function renderFarmDashboard() {
+  const ind = DB.indicadoresFarm();
+  const ultimas = DB.listarFarm().slice(0, 4);
+
+  $view.innerHTML = `
+    <div class="page-head">
+      <div class="page-head-row">
+        <div>
+          <h1>Farm</h1>
+          <div class="subtitle">Contas em criação e aquecimento</div>
+        </div>
+        <a class="btn-small" href="#/farm/nova">+ Nova conta</a>
+      </div>
+    </div>
+
+    ${searchHTML('farm-search', 'Pesquisar username ou plataforma')}
+
+    <div class="stats-grid">
+      <div class="stat wide">
+        <div class="label">Lucro do farm</div>
+        <div class="value ${ind.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(ind.lucro)}</div>
+        <div class="sub">${ind.vendidas} ${ind.vendidas === 1 ? 'conta vendida' : 'contas vendidas'}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Custo investido</div>
+        <div class="value">${fmtBRL(ind.investido)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Receita</div>
+        <div class="value">${fmtBRL(ind.receita)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Em farm agora</div>
+        <div class="value">${ind.ativas}</div>
+        <div class="sub">${ind.total} no total</div>
+      </div>
+      <div class="stat">
+        <div class="label">Vendidas</div>
+        <div class="value">${ind.vendidas}</div>
+      </div>
+    </div>
+
+    <h2>Por estágio</h2>
+    <div class="card detail-rows">
+      ${DB.FARM_STATUS.map(s => `
+        <div class="detail-row">
+          <span class="k"><span class="badge ${esc(badgeSlug(s))}">${esc(s)}</span></span>
+          <span class="v">${ind.porEstagio[s] || 0}</span>
+        </div>`).join('')}
+    </div>
+
+    <div class="section-row">
+      <h2>Últimas em farm</h2>
+      <a href="#/farm/lista">Ver todas</a>
+    </div>
+    <div class="conta-list">
+      ${ultimas.length
+        ? ultimas.map(farmItemHTML).join('')
+        : `<div class="card empty"><div class="icon">🌱</div><p>Nenhuma conta em farm ainda.<br>Toque em <strong>+ Nova conta</strong> para começar.</p></div>`}
+    </div>
+  `;
+
+  const input = document.getElementById('farm-search');
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      farmListaState.busca = input.value.trim();
+      location.hash = '#/farm/lista';
+    }
+  });
+}
+
+/* ============================================================
+   FARM — LISTA  (#/farm/lista)
+   ============================================================ */
+function renderFarmLista() {
+  const statusList = ['Todas', ...DB.FARM_STATUS];
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Farm
+    </a>
+    <div class="page-head">
+      <h1>Contas em farm</h1>
+    </div>
+    ${searchHTML('farm-lista-search', 'Pesquisar username ou plataforma')}
+    <div class="chips" id="farm-chips">
+      ${statusList.map(s => `<button class="chip ${farmListaState.status === s ? 'active' : ''}" data-status="${esc(s)}">${esc(s)}</button>`).join('')}
+    </div>
+    <div class="sort-row">
+      <span id="farm-count"></span>
+      <label>Ordenar:
+        <select id="farm-ordenar">
+          <option value="recente">Mais recente</option>
+          <option value="antiga">Mais antiga</option>
+          <option value="maior-lucro">Maior lucro</option>
+          <option value="menor-lucro">Menor lucro</option>
+        </select>
+      </label>
+    </div>
+    <div class="conta-list" id="farm-lista"></div>
+  `;
+
+  const $busca = document.getElementById('farm-lista-search');
+  const $ordenar = document.getElementById('farm-ordenar');
+  $busca.value = farmListaState.busca;
+  $ordenar.value = farmListaState.ordenar;
+
+  function refresh() {
+    const lista = DB.listarFarm(farmListaState);
+    document.getElementById('farm-count').textContent =
+      lista.length + (lista.length === 1 ? ' conta' : ' contas');
+    document.getElementById('farm-lista').innerHTML = lista.length
+      ? lista.map(farmItemHTML).join('')
+      : `<div class="card empty"><div class="icon">🔍</div><p>Nenhuma conta encontrada.</p></div>`;
+  }
+
+  $busca.addEventListener('input', () => { farmListaState.busca = $busca.value; refresh(); });
+  $ordenar.addEventListener('change', () => { farmListaState.ordenar = $ordenar.value; refresh(); });
+  document.getElementById('farm-chips').addEventListener('click', e => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    farmListaState.status = chip.dataset.status;
+    document.querySelectorAll('#farm-chips .chip').forEach(c =>
+      c.classList.toggle('active', c.dataset.status === farmListaState.status));
+    refresh();
+  });
+
+  refresh();
+}
+
+/* ============================================================
+   FARM — CADASTRO  (#/farm/nova)
+   ============================================================ */
+function renderFarmCadastro() {
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Voltar
+    </a>
+    <div class="page-head"><h1>Nova conta em farm</h1></div>
+
+    <form id="form-farm" novalidate>
+      <div class="form-group">
+        <label>Username <span class="req">*</span></label>
+        <input name="username" type="text" placeholder="@usuario" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Plataforma / tipo</label>
+        <input name="plataforma" type="text" placeholder="Instagram, TikTok, jogo…">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input name="email" type="email" placeholder="email@exemplo.com" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Senha</label>
+        <input name="senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Custo investido (R$)</label>
+        <input name="custo" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+      </div>
+      <div class="form-group">
+        <label>Estágio</label>
+        <div class="select-wrap">
+          <select name="status">
+            ${DB.FARM_STATUS.filter(s => s !== 'Vendida').map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="observacoes" placeholder="Anotações sobre a conta"></textarea>
+      </div>
+      <div class="form-error" id="form-error"></div>
+      <button class="btn btn-primary" type="submit">Adicionar ao farm</button>
+    </form>
+  `;
+
+  document.getElementById('form-farm').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      const conta = DB.criarFarm({
+        username: f.get('username'),
+        plataforma: f.get('plataforma'),
+        email: f.get('email'),
+        senha: f.get('senha'),
+        custo: f.get('custo'),
+        status: f.get('status'),
+        observacoes: f.get('observacoes'),
+      });
+      toast('Conta adicionada ao farm ✓');
+      location.hash = '#/farm/conta/' + conta.id;
+    } catch (err) {
+      const $err = document.getElementById('form-error');
+      $err.textContent = err.message;
+      $err.classList.add('show');
+    }
+  });
+}
+
+/* ============================================================
+   FARM — DETALHES  (#/farm/conta/:id)
+   ============================================================ */
+function renderFarmDetalhes(id) {
+  const c = DB.getFarm(id);
+  if (!c) {
+    $view.innerHTML = `<div class="card empty"><div class="icon">❓</div><p>Conta não encontrada.</p></div>`;
+    return;
+  }
+  const hist = DB.historicoDoFarm(id);
+  const vendida = c.preco_venda != null;
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm/lista">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Farm
+    </a>
+    <div class="page-head">
+      <div class="page-head-row">
+        <div>
+          <h1>@${esc(c.username.replace(/^@/, ''))}</h1>
+          <span class="badge ${esc(badgeSlug(c.status))}">${esc(c.status)}</span>
+        </div>
+        <button class="btn-small" id="btn-status">Alterar estágio</button>
+      </div>
+    </div>
+
+    <h2>Dados da conta</h2>
+    <div class="card detail-rows">
+      <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
+      <div class="detail-row"><span class="k">Plataforma</span><span class="v">${esc(c.plataforma) || '—'}</span></div>
+      <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}</span></div>
+      <div class="detail-row">
+        <span class="k">Senha</span>
+        <span class="v">
+          <span id="senha-v">${c.senha ? '••••••••' : '—'}</span>
+          ${c.senha ? '<button class="senha-toggle" id="senha-toggle">mostrar</button>' : ''}
+        </span>
+      </div>
+    </div>
+
+    <h2>Financeiro</h2>
+    <div class="card detail-rows">
+      <div class="detail-row"><span class="k">Custo investido</span><span class="v">${fmtBRL(c.custo)}</span></div>
+      <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
+      <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
+      <div class="detail-row"><span class="k">Data da venda</span><span class="v">${fmtData(c.data_venda)}</span></div>
+      <div class="detail-row"><span class="k">Lucro</span><span class="v ${vendida ? lucroClass(c) : ''}">${fmtBRL(c.lucro)}</span></div>
+    </div>
+
+    ${c.observacoes ? `
+      <h2>Observações</h2>
+      <div class="card"><p style="font-size:14px;color:var(--ink-2);white-space:pre-wrap;">${esc(c.observacoes)}</p></div>` : ''}
+
+    <h2>Histórico</h2>
+    <div class="card">
+      <div class="timeline">
+        ${hist.map(h => `
+          <div class="tl-item">
+            <div class="evento">${esc(h.evento)}</div>
+            ${h.descricao ? `<div class="descricao">${esc(h.descricao)}</div>` : ''}
+            <div class="quando">${fmtDataHora(h.criado_em)}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div style="margin-top:24px;">
+      ${!vendida ? `<a class="btn btn-success" href="#/farm/venda/${c.id}">Registrar venda</a>` : ''}
+      <button class="btn btn-danger-ghost" id="btn-excluir">Excluir conta</button>
+    </div>
+  `;
+
+  // Mostrar/ocultar senha
+  const $tg = document.getElementById('senha-toggle');
+  if ($tg) {
+    let visivel = false;
+    $tg.addEventListener('click', () => {
+      visivel = !visivel;
+      document.getElementById('senha-v').textContent = visivel ? c.senha : '••••••••';
+      $tg.textContent = visivel ? 'ocultar' : 'mostrar';
+    });
+  }
+
+  // Alterar estágio (sheet)
+  document.getElementById('btn-status').addEventListener('click', () => {
+    openSheet(`
+      <h3>Alterar estágio</h3>
+      <div class="opts">
+        ${DB.FARM_STATUS.map(s => `
+          <button class="opt" data-status="${esc(s)}">
+            <span>${esc(s)}</span>
+            ${s === c.status ? '<span class="check">✓</span>' : ''}
+          </button>`).join('')}
+      </div>
+      <button class="btn btn-secondary" id="sheet-cancel">Cancelar</button>
+    `, sheet => {
+      sheet.querySelectorAll('.opt').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const novo = btn.dataset.status;
+          // "Vendida" precisa de valor: encaminha para a tela de venda
+          if (novo === 'Vendida' && c.preco_venda == null) {
+            closeSheet();
+            location.hash = '#/farm/venda/' + id;
+            return;
+          }
+          try {
+            DB.alterarStatusFarm(id, novo);
+            closeSheet();
+            toast('Estágio atualizado ✓');
+            renderFarmDetalhes(id);
+          } catch (err) { toast(err.message); }
+        });
+      });
+      sheet.querySelector('#sheet-cancel').addEventListener('click', closeSheet);
+    });
+  });
+
+  // Excluir
+  document.getElementById('btn-excluir').addEventListener('click', () => {
+    if (confirm(`Excluir a conta @${c.username.replace(/^@/, '')} do farm? Essa ação não pode ser desfeita.`)) {
+      DB.excluirFarm(id);
+      toast('Conta excluída');
+      location.hash = '#/farm/lista';
+    }
+  });
+}
+
+/* ============================================================
+   FARM — VENDA  (#/farm/venda/:id)
+   ============================================================ */
+function renderFarmVenda(id) {
+  const c = DB.getFarm(id);
+  if (!c) { location.hash = '#/farm/lista'; return; }
+  if (c.preco_venda != null) { location.hash = '#/farm/conta/' + id; return; }
+
+  const hoje = new Date();
+  const hojeStr = hoje.getFullYear() + '-' +
+    String(hoje.getMonth() + 1).padStart(2, '0') + '-' +
+    String(hoje.getDate()).padStart(2, '0');
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm/conta/${id}">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Voltar
+    </a>
+    <div class="page-head">
+      <h1>Registrar venda</h1>
+      <div class="subtitle">@${esc(c.username.replace(/^@/, ''))} · custo de ${fmtBRL(c.custo)}</div>
+    </div>
+
+    <form id="form-farm-venda" novalidate>
+      <div class="form-group">
+        <label>Valor da venda (R$) <span class="req">*</span></label>
+        <input name="preco_venda" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+      </div>
+      <div class="form-group">
+        <label>Data da venda</label>
+        <input name="data_venda" type="date" value="${hojeStr}">
+      </div>
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="observacoes" placeholder="Anotações sobre a venda"></textarea>
+      </div>
+      <div class="card" style="margin-bottom:14px;">
+        <div class="detail-row" style="border:none;padding:4px 0;">
+          <span class="k">Lucro estimado</span>
+          <span class="v" id="lucro-preview">R$ 0,00</span>
+        </div>
+      </div>
+      <div class="form-error" id="form-error"></div>
+      <button class="btn btn-success" type="submit">Confirmar venda</button>
+    </form>
+  `;
+
+  const $preco = document.querySelector('[name=preco_venda]');
+  const $preview = document.getElementById('lucro-preview');
+  $preco.addEventListener('input', () => {
+    const lucro = Number($preco.value || 0) - Number(c.custo || 0);
+    $preview.textContent = fmtBRL(lucro);
+    $preview.className = 'v ' + (lucro >= 0 ? 'pos' : 'neg');
+  });
+
+  document.getElementById('form-farm-venda').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      let dataVenda = null;
+      if (f.get('data_venda')) {
+        const [a, m, d] = f.get('data_venda').split('-').map(Number);
+        const agora = new Date();
+        dataVenda = new Date(a, m - 1, d, agora.getHours(), agora.getMinutes()).toISOString();
+      }
+      DB.registrarVendaFarm(id, {
+        preco_venda: f.get('preco_venda'),
+        data_venda: dataVenda,
+        observacoes: f.get('observacoes'),
+      });
+      toast('Venda registrada ✓');
+      location.hash = '#/farm/conta/' + id;
+    } catch (err) {
+      const $err = document.getElementById('form-error');
+      $err.textContent = err.message;
+      $err.classList.add('show');
+    }
   });
 }
 
