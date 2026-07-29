@@ -34,6 +34,11 @@ function badgeSlug(status) {
   return String(status || '').replace(/\s+/g, '');
 }
 
+// Formata porcentagem no padrão pt-BR (ex.: 12,5%). Negativo já vem com '-'.
+function fmtPct(v) {
+  return Number(v || 0).toFixed(1).replace('.', ',') + '%';
+}
+
 /* ============================================================
    ROTEADOR
    ============================================================ */
@@ -55,13 +60,12 @@ function router() {
     else if (parts[1] === 'venda' && parts[2]) renderFarmVenda(parts[2]);
     else renderFarmDashboard();
   }
+  else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
   else renderDashboard();
 
-  // Tab ativa
-  const tab = parts[0] === 'contas' ? 'contas'
-    : (parts[0] === 'nova' ? 'nova'
-    : (parts[0] === 'farm' ? 'farm'
-    : (parts[0] === 'backup' ? 'backup' : 'dashboard')));
+  // Tab ativa (barra enxuta: Início + Backup)
+  const tab = (hash === '#/' || hash === '#') ? 'dashboard'
+    : (parts[0] === 'backup' ? 'backup' : '');
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -121,71 +125,183 @@ function searchHTML(id, placeholder) {
 }
 
 /* ============================================================
-   DASHBOARD  (#/)
+   DASHBOARD GERAL — Centro de Operações  (#/)
    ============================================================ */
+const OP_COR = { 'compra-venda': '#007AFF', 'farm': '#34C759', 'ofertas': '#AF52DE' };
+const OP_SLUG = { 'Compra/Venda': 'cv', 'Farm': 'farm', 'Ofertas': 'ofertas' };
+
+function opCardHTML(op) {
+  const cor = OP_COR[op.id] || '#007AFF';
+  let extra = '';
+  if (op.id === 'compra-venda') extra = `${op.extra.estoque} em estoque · ${op.extra.vendidasMes} vendida(s) no mês`;
+  else if (op.id === 'farm') extra = `${op.extra.emFarm} em farm · ${op.extra.vendidas} vendida(s)`;
+  else if (op.id === 'ofertas') extra = `${op.extra.lancamentosMes} lançamento(s) no mês`;
+  return `
+    <a class="op-card" href="${op.rota}" style="--op-cor:${cor}">
+      <div class="op-head">
+        <span class="op-dot"></span>
+        <span class="op-name">${esc(op.nome)}</span>
+        <span class="op-lucro ${op.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(op.lucro)}</span>
+      </div>
+      <div class="op-metrics">
+        <div><span class="m-label">Receita</span><span class="m-val">${fmtBRL(op.receita)}</span></div>
+        <div><span class="m-label">Investimento</span><span class="m-val">${fmtBRL(op.investimento)}</span></div>
+        <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${fmtPct(op.roi)}</span></div>
+      </div>
+      <div class="op-extra">${extra}<span class="op-chevron">›</span></div>
+    </a>`;
+}
+
+function atividadeItemHTML(a) {
+  return `
+    <a class="act-item" href="${a.rota}">
+      <span class="act-tag act-${OP_SLUG[a.operacao] || 'cv'}">${esc(a.operacao)}</span>
+      <div class="act-body">
+        <div class="act-evento">${esc(a.evento)}</div>
+        ${a.descricao ? `<div class="act-desc">${esc(a.descricao)}</div>` : ''}
+      </div>
+      <div class="act-when">${fmtDataHora(a.criado_em)}</div>
+    </a>`;
+}
+
 function renderDashboard() {
-  const ind = DB.indicadores();
-  const ultimas = DB.listarContas().slice(0, 4);
+  const g = DB.resumoGeral();
+  const atividade = DB.atividadeRecente(8);
 
   $view.innerHTML = `
     <div class="page-head">
-      <h1>Gestão Operações</h1>
+      <h1>Centro de Operações</h1>
       <div class="subtitle">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
     </div>
 
-    ${searchHTML('dash-search', 'Pesquisar username ou fornecedor')}
-
-    <div class="stats-grid">
-      <div class="stat wide">
-        <div class="label">Lucro realizado</div>
-        <div class="value ${ind.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(ind.lucro)}</div>
-        <div class="sub">Margem média de ${ind.margem.toFixed(1).replace('.', ',')}%</div>
+    <div class="geral-card">
+      <div class="geral-top">
+        <span class="geral-label">Lucro total</span>
+        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${fmtPct(g.roi)}</span>
       </div>
-      <div class="stat">
-        <div class="label">Total investido</div>
-        <div class="value">${fmtBRL(ind.investido)}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Ticket médio</div>
-        <div class="value">${fmtBRL(ind.ticket)}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Contas cadastradas</div>
-        <div class="value">${ind.total}</div>
-        <div class="sub">${ind.estoque} em estoque</div>
-      </div>
-      <div class="stat">
-        <div class="label">Vendidas no mês</div>
-        <div class="value">${ind.vendidasMes}</div>
+      <div class="geral-lucro ${g.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(g.lucro)}</div>
+      <div class="geral-metrics">
+        <div><span>Receita</span><b>${fmtBRL(g.receita)}</b></div>
+        <div><span>Investimento</span><b>${fmtBRL(g.investimento)}</b></div>
       </div>
     </div>
 
-    <h2>Lucro mensal</h2>
+    <h2>Operações</h2>
+    <div class="op-list">
+      ${g.operacoes.map(opCardHTML).join('')}
+    </div>
+
+    <h2>Evolução mensal</h2>
     <div class="card chart-card">
-      <div class="chart-sub">Últimos 6 meses · toque em uma barra para ver o valor</div>
+      <div class="chart-legend" id="chart-legend"></div>
+      <div class="chart-sub">Últimos 6 meses · lucro por operação · toque em um mês</div>
       <div class="chart-wrap" id="chart-wrap"></div>
     </div>
 
-    <div class="section-row">
-      <h2>Últimas contas</h2>
-      <a href="#/contas">Ver todas</a>
-    </div>
-    <div class="conta-list">
-      ${ultimas.length
-        ? ultimas.map(contaItemHTML).join('')
-        : `<div class="card empty"><div class="icon">📱</div><p>Nenhuma conta cadastrada ainda.<br>Toque em <strong>+</strong> para começar.</p></div>`}
+    <h2>Atividade recente</h2>
+    <div class="card activity">
+      ${atividade.length
+        ? atividade.map(atividadeItemHTML).join('')
+        : `<div class="empty" style="padding:24px;"><p>Nada por aqui ainda.<br>Suas ações vão aparecer nesta lista.</p></div>`}
     </div>
   `;
 
-  renderChart(document.getElementById('chart-wrap'), DB.lucroMensal(6));
+  renderChartOperacoes(
+    document.getElementById('chart-wrap'),
+    document.getElementById('chart-legend'),
+    DB.evolucaoMensal(6)
+  );
+}
 
-  // Pesquisa no dashboard leva para a lista já filtrada
-  const input = document.getElementById('dash-search');
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && input.value.trim()) {
-      listaState.busca = input.value.trim();
-      location.hash = '#/contas';
-    }
+/* ---------- Gráfico de evolução mensal por operação (barras agrupadas) ---------- */
+const OPS_SERIES = [
+  { key: 'compraVenda', label: 'Compra/Venda', cor: '#007AFF' },
+  { key: 'farm',        label: 'Farm',         cor: '#34C759' },
+  { key: 'ofertas',     label: 'Ofertas',      cor: '#AF52DE' },
+];
+
+function renderChartOperacoes(container, legendEl, meses) {
+  if (legendEl) {
+    legendEl.innerHTML = OPS_SERIES.map(s =>
+      `<span class="leg"><span class="leg-dot" style="background:${s.cor}"></span>${s.label}</span>`).join('');
+  }
+
+  const W = 340, H = 190;
+  const pad = { top: 16, right: 8, bottom: 26, left: 46 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  const todos = [];
+  meses.forEach(m => OPS_SERIES.forEach(s => todos.push(m[s.key])));
+  let max = Math.max(0, ...todos);
+  let min = Math.min(0, ...todos);
+  if (max === 0 && min === 0) max = 100;
+  const range = max - min;
+  const step = niceStep(range / 3);
+  max = Math.ceil(max / step) * step;
+  min = Math.floor(min / step) * step;
+
+  const y = v => pad.top + plotH * (1 - (v - min) / (max - min));
+  const slot = plotW / meses.length;
+  const groupW = Math.min(slot * 0.72, 42);
+  const barW = groupW / OPS_SERIES.length;
+  const y0 = y(0);
+
+  let grid = '', labels = '', bars = '', hits = '';
+  for (let v = min; v <= max + 1e-6; v += step) {
+    grid += `<line x1="${pad.left}" x2="${W - pad.right}" y1="${y(v)}" y2="${y(v)}" stroke="#E5E5EA" stroke-width="1"/>`;
+    labels += `<text x="${pad.left - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="9" fill="#AEAEB2">${compactBRL(v)}</text>`;
+  }
+  meses.forEach((m, i) => {
+    const gx = pad.left + slot * i + (slot - groupW) / 2;
+    OPS_SERIES.forEach((s, j) => {
+      const val = m[s.key];
+      const x = gx + barW * j;
+      const yV = y(val);
+      const top = Math.min(y0, yV);
+      const h = Math.abs(y0 - yV);
+      const w = barW - 2;
+      if (h < 1) {
+        bars += `<rect x="${x}" y="${y0 - 1}" width="${w}" height="2" rx="1" fill="#E5E5EA"/>`;
+      } else {
+        const r = Math.min(2.5, w / 2, h);
+        bars += `<rect x="${x}" y="${top}" width="${w}" height="${h}" rx="${r}" fill="${s.cor}"/>`;
+      }
+    });
+    labels += `<text x="${pad.left + slot * i + slot / 2}" y="${H - 9}" text-anchor="middle" font-size="9.5" fill="#6E6E73">${MESES_ABREV[m.mes]}</text>`;
+    hits += `<rect class="grp" data-i="${i}" x="${pad.left + slot * i}" y="${pad.top}" width="${slot}" height="${plotH}" fill="transparent"/>`;
+  });
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Evolução mensal do lucro por operação">
+      ${grid}
+      <line x1="${pad.left}" x2="${W - pad.right}" y1="${y0}" y2="${y0}" stroke="#AEAEB2" stroke-width="1"/>
+      ${labels}
+      ${bars}
+      ${hits}
+    </svg>
+    <div class="chart-tooltip chart-tooltip-multi" id="chart-tt"></div>`;
+
+  const tt = container.querySelector('#chart-tt');
+  const svg = container.querySelector('svg');
+  container.querySelectorAll('.grp').forEach(gEl => {
+    const show = () => {
+      const i = Number(gEl.dataset.i);
+      const m = meses[i];
+      tt.innerHTML =
+        `<div class="tt-title">${MESES_ABREV[m.mes]}/${String(m.ano).slice(2)}</div>` +
+        OPS_SERIES.map(s => `<div class="tt-row"><span class="leg-dot" style="background:${s.cor}"></span>${s.label} <b>${fmtBRL(m[s.key])}</b></div>`).join('') +
+        `<div class="tt-row tt-geral">Geral <b>${fmtBRL(m.geral)}</b></div>`;
+      const rect = svg.getBoundingClientRect();
+      const scale = rect.width / W;
+      const cx = (pad.left + slot * i + slot / 2) * scale;
+      tt.style.left = Math.max(60, Math.min(rect.width - 60, cx)) + 'px';
+      tt.style.top = (pad.top * scale + 4) + 'px';
+      tt.classList.add('show');
+    };
+    gEl.addEventListener('pointerenter', show);
+    gEl.addEventListener('pointerdown', show);
+    gEl.addEventListener('pointerleave', () => tt.classList.remove('show'));
   });
 }
 
@@ -309,8 +425,15 @@ function renderLista() {
   const statusList = ['Todas', ...DB.STATUS];
 
   $view.innerHTML = `
+    <a class="back-link" href="#/">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Início
+    </a>
     <div class="page-head">
-      <h1>Contas</h1>
+      <div class="page-head-row">
+        <div><h1>Contas</h1></div>
+        <a class="btn-small" href="#/nova">+ Nova conta</a>
+      </div>
     </div>
     ${searchHTML('lista-search', 'Pesquisar username ou fornecedor')}
     <div class="chips" id="chips">
@@ -670,7 +793,8 @@ function renderBackup() {
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Contas</span><span class="v">${t.contas}</span></div>
       <div class="detail-row"><span class="k">Contas em farm</span><span class="v">${t.farm}</span></div>
-      <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos + t.farmEventos}</span></div>
+      <div class="detail-row"><span class="k">Meses de ofertas</span><span class="v">${t.ofertas}</span></div>
+      <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos + t.farmEventos + t.ofertasEventos}</span></div>
       <div class="detail-row"><span class="k">Último backup</span><span class="v">${ultimo ? fmtDataHora(ultimo) : 'Nunca'}</span></div>
     </div>
 
@@ -752,6 +876,10 @@ function renderFarmDashboard() {
   const ultimas = DB.listarFarm().slice(0, 4);
 
   $view.innerHTML = `
+    <a class="back-link" href="#/">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Início
+    </a>
     <div class="page-head">
       <div class="page-head-row">
         <div>
@@ -1168,6 +1296,188 @@ function renderFarmVenda(id) {
       const $err = document.getElementById('form-error');
       $err.textContent = err.message;
       $err.classList.add('show');
+    }
+  });
+}
+
+/* ============================================================
+   GRUPO DE OFERTAS  (#/ofertas  ·  #/ofertas/AAAA-MM)
+   ============================================================ */
+function receitaRowHTML(r) {
+  const info = [r.categoria, r.descricao].filter(Boolean).join(' · ');
+  return `
+    <div class="receita-row" data-id="${r.id}">
+      <div class="rr-info">
+        <div class="rr-val">${fmtBRL(r.valor)}</div>
+        <div class="rr-meta">${fmtData(r.data)}${info ? ' · ' + esc(info) : ''}</div>
+      </div>
+      <button class="rr-del" data-id="${r.id}" aria-label="Excluir receita">✕</button>
+    </div>`;
+}
+
+function renderOfertas(param) {
+  const agora = new Date();
+  let ano = agora.getFullYear(), mes = agora.getMonth();
+  if (param && /^\d{4}-\d{2}$/.test(param)) {
+    const [a, m] = param.split('-').map(Number);
+    ano = a; mes = m - 1;
+  }
+  const paramAtual = ano + '-' + String(mes + 1).padStart(2, '0');
+
+  const res = DB.resumoOfertas();
+  const o = DB.getOfertaMes(ano, mes);
+  const investimento = o ? o.investimento : 0;
+  const receitas = o ? [...o.receitas].sort((a, b) => (b.data || '').localeCompare(a.data || '')) : [];
+  const receitaMes = receitas.reduce((s, r) => s + Number(r.valor || 0), 0);
+  const lucroMes = receitaMes - investimento;
+  const roiMes = investimento > 0 ? (lucroMes / investimento) * 100 : 0;
+
+  const fmtParam = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const prevP = fmtParam(new Date(ano, mes - 1, 1));
+  const nextP = fmtParam(new Date(ano, mes + 1, 1));
+  const mesLabel = MESES_ABREV[mes] + '/' + ano;
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Início
+    </a>
+    <div class="page-head">
+      <h1>Grupo de Ofertas</h1>
+      <div class="subtitle">Financeiro das ofertas de afiliado</div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat wide">
+        <div class="label">Lucro total</div>
+        <div class="value ${res.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(res.lucro)}</div>
+        <div class="sub">ROI de ${fmtPct(res.roi)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Receita total</div>
+        <div class="value">${fmtBRL(res.receita)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Investimento total</div>
+        <div class="value">${fmtBRL(res.investimento)}</div>
+      </div>
+    </div>
+
+    <div class="month-switch">
+      <a class="ms-arrow" href="#/ofertas/${prevP}" aria-label="Mês anterior">‹</a>
+      <span class="ms-label">${mesLabel}</span>
+      <a class="ms-arrow" href="#/ofertas/${nextP}" aria-label="Próximo mês">›</a>
+    </div>
+
+    <div class="card detail-rows">
+      <div class="detail-row">
+        <span class="k">Investimento do mês</span>
+        <span class="v">${fmtBRL(investimento)} <button class="senha-toggle" id="btn-invest">${investimento > 0 ? 'editar' : 'definir'}</button></span>
+      </div>
+      <div class="detail-row"><span class="k">Receita do mês</span><span class="v">${fmtBRL(receitaMes)}</span></div>
+      <div class="detail-row"><span class="k">Lucro do mês</span><span class="v ${lucroMes >= 0 ? 'pos' : 'neg'}">${fmtBRL(lucroMes)}</span></div>
+      <div class="detail-row"><span class="k">ROI do mês</span><span class="v ${roiMes >= 0 ? 'pos' : 'neg'}">${investimento > 0 ? fmtPct(roiMes) : '—'}</span></div>
+    </div>
+
+    <div class="section-row">
+      <h2>Receitas de ${mesLabel}</h2>
+      <button class="btn-small" id="btn-add-receita">+ Receita</button>
+    </div>
+    <div class="card" id="receitas-card">
+      ${receitas.length
+        ? receitas.map(receitaRowHTML).join('')
+        : `<div class="empty" style="padding:24px;"><p>Nenhuma receita lançada neste mês.</p></div>`}
+    </div>
+  `;
+
+  // Definir/editar investimento do mês
+  document.getElementById('btn-invest').addEventListener('click', () => {
+    openSheet(`
+      <h3>Investimento de ${mesLabel}</h3>
+      <div class="form-group">
+        <label>Quanto você vai investir neste mês (R$)</label>
+        <input id="inp-invest" type="number" inputmode="decimal" step="0.01" min="0" value="${investimento || ''}" placeholder="0,00">
+      </div>
+      <button class="btn btn-primary" id="save-invest">Salvar</button>
+      <button class="btn btn-secondary" id="cancel-invest">Cancelar</button>
+    `, sheet => {
+      const inp = sheet.querySelector('#inp-invest');
+      setTimeout(() => inp.focus(), 50);
+      sheet.querySelector('#save-invest').addEventListener('click', () => {
+        try {
+          DB.definirInvestimentoMes(ano, mes, inp.value);
+          closeSheet();
+          toast('Investimento salvo ✓');
+          renderOfertas(paramAtual);
+        } catch (err) { toast(err.message); }
+      });
+      sheet.querySelector('#cancel-invest').addEventListener('click', closeSheet);
+    });
+  });
+
+  // Lançar receita
+  document.getElementById('btn-add-receita').addEventListener('click', () => {
+    const ehMesAtual = (ano === agora.getFullYear() && mes === agora.getMonth());
+    const dataDefault = ehMesAtual
+      ? agora.getFullYear() + '-' + String(agora.getMonth() + 1).padStart(2, '0') + '-' + String(agora.getDate()).padStart(2, '0')
+      : `${ano}-${String(mes + 1).padStart(2, '0')}-01`;
+    openSheet(`
+      <h3>Lançar receita — ${mesLabel}</h3>
+      <div class="form-group">
+        <label>Valor recebido (R$)</label>
+        <input id="inp-rval" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+      </div>
+      <div class="form-group">
+        <label>Data</label>
+        <input id="inp-rdata" type="date" value="${dataDefault}">
+      </div>
+      <div class="form-group">
+        <label>Categoria</label>
+        <div class="select-wrap">
+          <select id="inp-rcat">
+            ${DB.OFERTAS_CATEGORIAS.map(cat => `<option value="${esc(cat)}"${cat === 'Comissão' ? ' selected' : ''}>${esc(cat)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Descrição (opcional)</label>
+        <input id="inp-rdesc" type="text" placeholder="Ex.: semana 1">
+      </div>
+      <div class="form-error" id="sheet-err"></div>
+      <button class="btn btn-success" id="save-receita">Lançar receita</button>
+      <button class="btn btn-secondary" id="cancel-receita">Cancelar</button>
+    `, sheet => {
+      const val = sheet.querySelector('#inp-rval');
+      setTimeout(() => val.focus(), 50);
+      sheet.querySelector('#save-receita').addEventListener('click', () => {
+        try {
+          const dataStr = sheet.querySelector('#inp-rdata').value;
+          DB.adicionarReceitaOferta(ano, mes, {
+            valor: val.value,
+            data: dataStr ? new Date(dataStr + 'T12:00:00').toISOString() : null,
+            categoria: sheet.querySelector('#inp-rcat').value,
+            descricao: sheet.querySelector('#inp-rdesc').value,
+          });
+          closeSheet();
+          toast('Receita lançada ✓');
+          renderOfertas(paramAtual);
+        } catch (err) {
+          const e = sheet.querySelector('#sheet-err');
+          e.textContent = err.message; e.classList.add('show');
+        }
+      });
+      sheet.querySelector('#cancel-receita').addEventListener('click', closeSheet);
+    });
+  });
+
+  // Excluir receita
+  document.getElementById('receitas-card').addEventListener('click', e => {
+    const btn = e.target.closest('.rr-del');
+    if (!btn || !o) return;
+    if (confirm('Excluir esta receita?')) {
+      DB.excluirReceitaOferta(o.id, btn.dataset.id);
+      toast('Receita excluída');
+      renderOfertas(paramAtual);
     }
   });
 }

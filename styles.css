@@ -395,3 +395,88 @@ h2 { font-size: 17px; font-weight: 600; color: var(--ink); margin: 24px 0 10px; 
 .section-row { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 10px; }
 .section-row h2 { margin: 0; }
 .section-row a { font-size: 14px; color: var(--primary); text-decoration: none; font-weight: 500; }
+
+/* ============================================================
+   V2 — Centro de Operações
+   ============================================================ */
+/* Card geral (hero) */
+.geral-card {
+  background: linear-gradient(160deg, #0A84FF, #0060C9);
+  color: #fff;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 8px 24px rgba(0,96,201,0.28);
+  margin-bottom: 8px;
+}
+.geral-top { display: flex; justify-content: space-between; align-items: center; }
+.geral-label { font-size: 13px; opacity: 0.85; font-weight: 500; }
+.geral-roi { font-size: 12px; font-weight: 700; background: rgba(255,255,255,0.18); padding: 4px 10px; border-radius: 100px; }
+.geral-lucro { font-size: 34px; font-weight: 800; letter-spacing: -0.5px; margin: 6px 0 14px; }
+.geral-metrics { display: flex; gap: 24px; border-top: 1px solid rgba(255,255,255,0.22); padding-top: 12px; }
+.geral-metrics > div { display: flex; flex-direction: column; gap: 2px; }
+.geral-metrics span { font-size: 11px; opacity: 0.8; }
+.geral-metrics b { font-size: 16px; font-weight: 700; }
+
+/* Cards de operação */
+.op-list { display: flex; flex-direction: column; gap: 12px; }
+.op-card {
+  display: block; text-decoration: none; color: inherit;
+  background: var(--card); border-radius: var(--radius);
+  padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  border-left: 4px solid var(--op-cor, var(--primary));
+}
+.op-card:active { background: #FAFAFA; }
+.op-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.op-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--op-cor, var(--primary)); flex: none; }
+.op-name { font-weight: 700; font-size: 16px; flex: 1; }
+.op-lucro { font-weight: 800; font-size: 17px; }
+.op-lucro.pos { color: var(--success-ink); }
+.op-lucro.neg { color: var(--danger); }
+.op-metrics { display: flex; justify-content: space-between; gap: 8px; }
+.op-metrics > div { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.op-metrics .m-label { font-size: 11px; color: var(--ink-3); }
+.op-metrics .m-val { font-size: 15px; font-weight: 600; }
+.op-metrics .m-val.pos { color: var(--success-ink); }
+.op-metrics .m-val.neg { color: var(--danger); }
+.op-extra { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px solid #F2F2F4; font-size: 12px; color: var(--ink-2); }
+.op-chevron { color: var(--ink-3); font-size: 18px; }
+
+/* Legenda e tooltip do gráfico agrupado */
+.chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.leg { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-2); font-weight: 500; }
+.leg-dot { width: 9px; height: 9px; border-radius: 3px; display: inline-block; flex: none; }
+.chart-tooltip-multi { transform: translate(-50%, 0); text-align: left; white-space: nowrap; }
+.chart-tooltip-multi .tt-title { font-weight: 700; margin-bottom: 3px; }
+.chart-tooltip-multi .tt-row { display: flex; align-items: center; gap: 5px; font-size: 11px; margin-top: 1px; }
+.chart-tooltip-multi .tt-row b { margin-left: auto; padding-left: 10px; }
+.chart-tooltip-multi .tt-geral { border-top: 1px solid rgba(255,255,255,0.25); margin-top: 4px; padding-top: 4px; }
+
+/* Atividade recente */
+.activity { padding: 6px 16px; }
+.act-item { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #F2F2F4; text-decoration: none; color: inherit; }
+.act-item:last-child { border-bottom: none; }
+.act-tag { flex: none; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 100px; }
+.act-cv { background: #EAF3FF; color: #0060C9; }
+.act-farm { background: #E3F6E9; color: #1F8B4C; }
+.act-ofertas { background: #F1EAFE; color: #6C3FD1; }
+.act-body { flex: 1; min-width: 0; }
+.act-evento { font-size: 14px; font-weight: 600; }
+.act-desc { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-when { font-size: 11px; color: var(--ink-3); flex: none; text-align: right; }
+
+/* Seletor de mês (Ofertas) */
+.month-switch { display: flex; align-items: center; justify-content: center; gap: 20px; margin: 4px 0 12px; }
+.ms-arrow { width: 36px; height: 36px; border-radius: 50%; background: var(--card); display: flex; align-items: center; justify-content: center; text-decoration: none; color: var(--primary); font-size: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.ms-label { font-size: 16px; font-weight: 700; min-width: 96px; text-align: center; }
+
+/* Linhas de receita (Ofertas) */
+.receita-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #F2F2F4; }
+.receita-row:last-child { border-bottom: none; }
+.rr-info { flex: 1; min-width: 0; }
+.rr-val { font-size: 15px; font-weight: 700; color: var(--success-ink); }
+.rr-meta { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+.rr-del { flex: none; width: 30px; height: 30px; border-radius: 50%; border: none; background: #F2F2F4; color: var(--ink-2); font-size: 13px; cursor: pointer; }
+
+/* Sheet com formulário */
+.sheet .form-group { text-align: left; }
+.sheet .btn + .btn { margin-top: 8px; }
