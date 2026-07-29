@@ -12,6 +12,11 @@ const DB = (() => {
   // Estágios do farm (módulo independente de contas)
   const FARM_STATUS = ['Crescendo', 'Shop aceito', 'Monetizada', 'Sem nada', 'Vendida'];
 
+  // Categorias sugeridas para lançamentos do Grupo de Ofertas
+  const OFERTAS_CATEGORIAS = ['Tráfego Meta', 'Google Ads', 'Ferramentas', 'Comissão', 'Venda diária', 'Outros'];
+
+  const MESES_NOME = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
   function uuid() {
     if (crypto.randomUUID) return crypto.randomUUID();
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -30,10 +35,12 @@ const DB = (() => {
         obj.historico = obj.historico || [];
         obj.farm = obj.farm || [];
         obj.farm_historico = obj.farm_historico || [];
+        obj.ofertas = obj.ofertas || [];
+        obj.ofertas_historico = obj.ofertas_historico || [];
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [] };
+    return { contas: [], historico: [], farm: [], farm_historico: [], ofertas: [], ofertas_historico: [] };
   }
 
   let data = load();
@@ -60,6 +67,16 @@ const DB = (() => {
     data.farm_historico.push({
       id: uuid(),
       farm_id: farmId,
+      evento,
+      descricao: descricao || '',
+      criado_em: now(),
+    });
+  }
+
+  function addOfertaHistorico(ofertaId, evento, descricao) {
+    data.ofertas_historico.push({
+      id: uuid(),
+      oferta_id: ofertaId,
       evento,
       descricao: descricao || '',
       criado_em: now(),
@@ -419,6 +436,198 @@ const DB = (() => {
     };
   }
 
+  // ============================================================
+  //   GRUPO DE OFERTAS — financeiro por mês (afiliado)
+  //   Investimento único por mês (definido no início) + receitas
+  //   lançadas ao longo do mês (ex.: semanalmente).
+  // ============================================================
+  function getOfertaMes(ano, mes) {
+    return data.ofertas.find(o => o.ano === ano && o.mes === mes) || null;
+  }
+
+  function getOfertaMesId(id) {
+    return data.ofertas.find(o => o.id === id) || null;
+  }
+
+  function garantirMes(ano, mes) {
+    let o = getOfertaMes(ano, mes);
+    if (!o) {
+      o = { id: uuid(), ano, mes, investimento: 0, receitas: [], criado_em: now(), atualizado_em: now() };
+      data.ofertas.push(o);
+    }
+    return o;
+  }
+
+  function totalReceitasMes(o) {
+    return o.receitas.reduce((s, r) => s + Number(r.valor || 0), 0);
+  }
+
+  function definirInvestimentoMes(ano, mes, valor) {
+    if (valor == null || valor === '' || isNaN(Number(valor)) || Number(valor) < 0)
+      throw new Error('Informe um valor de investimento válido.');
+    const o = garantirMes(ano, mes);
+    const anterior = o.investimento;
+    o.investimento = Number(valor);
+    o.atualizado_em = now();
+    const rotulo = MESES_NOME[mes] + '/' + o.ano;
+    if (anterior === 0) {
+      addOfertaHistorico(o.id, 'Investimento definido', `Investimento de ${fmtBRL(o.investimento)} para ${rotulo}.`);
+    } else if (anterior !== o.investimento) {
+      addOfertaHistorico(o.id, 'Investimento atualizado', `De ${fmtBRL(anterior)} para ${fmtBRL(o.investimento)} em ${rotulo}.`);
+    }
+    persist();
+    return o;
+  }
+
+  function adicionarReceitaOferta(ano, mes, { valor, data: dataReceita, categoria, descricao }) {
+    if (valor == null || valor === '' || isNaN(Number(valor)))
+      throw new Error('Informe um valor de receita válido.');
+    const o = garantirMes(ano, mes);
+    const receita = {
+      id: uuid(),
+      valor: Number(valor),
+      data: dataReceita || now(),
+      categoria: String(categoria || '').trim(),
+      descricao: String(descricao || '').trim(),
+    };
+    o.receitas.push(receita);
+    o.atualizado_em = now();
+    const detalhe = receita.descricao || receita.categoria;
+    addOfertaHistorico(o.id, 'Receita registrada',
+      `Receita de ${fmtBRL(receita.valor)} em ${MESES_NOME[mes]}/${o.ano}${detalhe ? ' — ' + detalhe : ''}.`);
+    persist();
+    return receita;
+  }
+
+  function excluirReceitaOferta(mesId, receitaId) {
+    const o = getOfertaMesId(mesId);
+    if (!o) throw new Error('Mês não encontrado.');
+    o.receitas = o.receitas.filter(r => r.id !== receitaId);
+    o.atualizado_em = now();
+    persist();
+    return o;
+  }
+
+  function listarOfertasMeses() {
+    return [...data.ofertas].sort((a, b) => (b.ano - a.ano) || (b.mes - a.mes));
+  }
+
+  function historicoDasOfertas(mesId) {
+    return data.ofertas_historico
+      .filter(h => h.oferta_id === mesId)
+      .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  }
+
+  // ============================================================
+  //   RESUMOS PADRONIZADOS — consumidos pelo Dashboard Geral
+  //   Modelo caixa: lucro = receita − investimento; roi = lucro/investimento.
+  //   Toda nova operação só precisa expor um resumo neste formato.
+  // ============================================================
+  function roiDe(receita, investimento) {
+    return investimento > 0 ? ((receita - investimento) / investimento) * 100 : 0;
+  }
+
+  function resumoCompraVenda() {
+    const vendidas = data.contas.filter(c => c.preco_venda != null);
+    const investimento = data.contas.reduce((s, c) => s + Number(c.preco_compra || 0), 0);
+    const receita = vendidas.reduce((s, c) => s + Number(c.preco_venda || 0), 0);
+    const estoque = data.contas.length - vendidas.length;
+    const agora = new Date();
+    const vendidasMes = vendidas.filter(c => {
+      const d = new Date(c.data_venda);
+      return d.getFullYear() === agora.getFullYear() && d.getMonth() === agora.getMonth();
+    }).length;
+    return {
+      id: 'compra-venda', nome: 'Compra e Venda', rota: '#/contas',
+      receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
+      ativas: estoque, concluidas: vendidas.length,
+      extra: { estoque, vendidasMes },
+    };
+  }
+
+  function resumoFarm() {
+    const vendidas = data.farm.filter(f => f.preco_venda != null);
+    const investimento = data.farm.reduce((s, f) => s + Number(f.custo || 0), 0);
+    const receita = vendidas.reduce((s, f) => s + Number(f.preco_venda || 0), 0);
+    const emFarm = data.farm.filter(f => f.status !== 'Vendida').length;
+    return {
+      id: 'farm', nome: 'Farm', rota: '#/farm',
+      receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
+      ativas: emFarm, concluidas: vendidas.length,
+      extra: { emFarm, vendidas: vendidas.length },
+    };
+  }
+
+  function resumoOfertas() {
+    const investimento = data.ofertas.reduce((s, o) => s + Number(o.investimento || 0), 0);
+    const receita = data.ofertas.reduce((s, o) => s + totalReceitasMes(o), 0);
+    const agora = new Date();
+    const mesAtual = getOfertaMes(agora.getFullYear(), agora.getMonth());
+    const lancamentosMes = mesAtual ? mesAtual.receitas.length : 0;
+    return {
+      id: 'ofertas', nome: 'Grupo de Ofertas', rota: '#/ofertas',
+      receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
+      ativas: data.ofertas.length, concluidas: 0,
+      extra: { lancamentosMes },
+    };
+  }
+
+  // Registro de operações — adicionar uma nova é só incluir seu resumo aqui.
+  function resumosOperacoes() {
+    return [resumoCompraVenda(), resumoFarm(), resumoOfertas()];
+  }
+
+  function resumoGeral() {
+    const ops = resumosOperacoes();
+    const receita = ops.reduce((s, o) => s + o.receita, 0);
+    const investimento = ops.reduce((s, o) => s + o.investimento, 0);
+    return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento), operacoes: ops };
+  }
+
+  // Evolução mensal por operação (modelo caixa: entradas − saídas no mês)
+  function evolucaoMensal(n = 6) {
+    const meses = [];
+    const agora = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(agora.getFullYear(), agora.getMonth() - i, 1);
+      meses.push({ ano: d.getFullYear(), mes: d.getMonth(), compraVenda: 0, farm: 0, ofertas: 0, geral: 0 });
+    }
+    const bucket = (ano, mes) => meses.find(m => m.ano === ano && m.mes === mes);
+
+    data.contas.forEach(c => {
+      if (c.data_compra) { const d = new Date(c.data_compra); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.compraVenda -= Number(c.preco_compra || 0); }
+      if (c.data_venda) { const d = new Date(c.data_venda); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.compraVenda += Number(c.preco_venda || 0); }
+    });
+    data.farm.forEach(f => {
+      if (f.data_inicio) { const d = new Date(f.data_inicio); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.farm -= Number(f.custo || 0); }
+      if (f.data_venda) { const d = new Date(f.data_venda); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.farm += Number(f.preco_venda || 0); }
+    });
+    data.ofertas.forEach(o => {
+      const b = bucket(o.ano, o.mes);
+      if (b) b.ofertas += totalReceitasMes(o) - Number(o.investimento || 0);
+    });
+    meses.forEach(m => { m.geral = m.compraVenda + m.farm + m.ofertas; });
+    return meses;
+  }
+
+  // Feed unificado dos últimos eventos de todas as operações
+  function atividadeRecente(limite = 12) {
+    const itens = [];
+    data.historico.forEach(h => itens.push({
+      operacao: 'Compra/Venda', evento: h.evento, descricao: h.descricao,
+      criado_em: h.criado_em, rota: '#/conta/' + h.conta_id,
+    }));
+    data.farm_historico.forEach(h => itens.push({
+      operacao: 'Farm', evento: h.evento, descricao: h.descricao,
+      criado_em: h.criado_em, rota: '#/farm/conta/' + h.farm_id,
+    }));
+    data.ofertas_historico.forEach(h => itens.push({
+      operacao: 'Ofertas', evento: h.evento, descricao: h.descricao,
+      criado_em: h.criado_em, rota: '#/ofertas',
+    }));
+    return itens.sort((a, b) => b.criado_em.localeCompare(a.criado_em)).slice(0, limite);
+  }
+
   // ---------- Indicadores do dashboard ----------
   function indicadores() {
     const contas = data.contas;
@@ -470,12 +679,14 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 2,
+      versao: 3,
       exportado_em: now(),
       contas: data.contas,
       historico: data.historico,
       farm: data.farm,
       farm_historico: data.farm_historico,
+      ofertas: data.ofertas,
+      ofertas_historico: data.ofertas_historico,
     }, null, 2);
   }
 
@@ -488,14 +699,22 @@ const DB = (() => {
       throw new Error('Arquivo inválido: não é um backup do Gestão Op.');
     if (obj.contas.some(c => !c.id || !c.username))
       throw new Error('Backup corrompido: contas sem id/username.');
-    // Farm: opcional (retrocompatível com backups da versão 1)
+    // Farm e Ofertas: opcionais (retrocompatível com backups das versões 1 e 2)
     const farm = Array.isArray(obj.farm) ? obj.farm : [];
     const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
     if (farm.some(f => !f.id || !f.username))
       throw new Error('Backup corrompido: farm sem id/username.');
-    data = { contas: obj.contas, historico: obj.historico, farm, farm_historico: farmHist };
+    const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
+    const ofertasHist = Array.isArray(obj.ofertas_historico) ? obj.ofertas_historico : [];
+    if (ofertas.some(o => !o.id || !Array.isArray(o.receitas)))
+      throw new Error('Backup corrompido: ofertas em formato inválido.');
+    data = {
+      contas: obj.contas, historico: obj.historico,
+      farm, farm_historico: farmHist,
+      ofertas, ofertas_historico: ofertasHist,
+    };
     persist();
-    return { contas: data.contas.length, eventos: data.historico.length, farm: data.farm.length };
+    return { contas: data.contas.length, eventos: data.historico.length, farm: data.farm.length, ofertas: data.ofertas.length };
   }
 
   function totais() {
@@ -504,16 +723,22 @@ const DB = (() => {
       eventos: data.historico.length,
       farm: data.farm.length,
       farmEventos: data.farm_historico.length,
+      ofertas: data.ofertas.length,
+      ofertasEventos: data.ofertas_historico.length,
     };
   }
 
   return {
-    STATUS, FARM_STATUS,
+    STATUS, FARM_STATUS, OFERTAS_CATEGORIAS,
     criarConta, atualizarConta, alterarStatus, registrarVenda, cancelarVenda, excluirConta,
     getConta, listarContas, historicoDaConta,
     indicadores, lucroMensal,
     criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
+    getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
+    excluirReceitaOferta, listarOfertasMeses, historicoDasOfertas, totalReceitasMes,
+    resumoCompraVenda, resumoFarm, resumoOfertas, resumosOperacoes, resumoGeral,
+    evolucaoMensal, atividadeRecente,
     exportar, importar, totais,
   };
 })();
