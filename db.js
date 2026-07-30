@@ -313,9 +313,13 @@ const DB = (() => {
     ['plataforma', 'email', 'senha', 'observacoes'].forEach(k => {
       if (campos[k] != null) f[k] = String(campos[k]).trim();
     });
-    if (campos.custo != null && campos.custo !== '' && !isNaN(Number(campos.custo))) {
+    if (campos.custo != null && campos.custo !== '' && !isNaN(Number(campos.custo)) && Number(campos.custo) >= 0) {
+      const anterior = f.custo;
       f.custo = Number(campos.custo);
       f.lucro = calcLucroFarm(f);
+      if (anterior !== f.custo) {
+        addFarmHistorico(id, 'Custo atualizado', `De ${fmtBRL(anterior)} para ${fmtBRL(f.custo)}.`);
+      }
     }
     f.atualizado_em = now();
     persist();

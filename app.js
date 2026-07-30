@@ -1121,7 +1121,7 @@ function renderFarmDetalhes(id) {
 
     <h2>Financeiro</h2>
     <div class="card detail-rows">
-      <div class="detail-row"><span class="k">Custo investido</span><span class="v">${fmtBRL(c.custo)}</span></div>
+      <div class="detail-row"><span class="k">Custo investido</span><span class="v">${fmtBRL(c.custo)} <button class="senha-toggle" id="btn-edit-custo">editar</button></span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
       <div class="detail-row"><span class="k">Data da venda</span><span class="v">${fmtData(c.data_venda)}</span></div>
@@ -1161,6 +1161,31 @@ function renderFarmDetalhes(id) {
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
     });
   }
+
+  // Editar custo investido
+  document.getElementById('btn-edit-custo').addEventListener('click', () => {
+    openSheet(`
+      <h3>Editar custo investido</h3>
+      <div class="form-group">
+        <label>Custo investido (R$)</label>
+        <input id="inp-custo" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo || ''}" placeholder="0,00">
+      </div>
+      <button class="btn btn-primary" id="save-custo">Salvar</button>
+      <button class="btn btn-secondary" id="cancel-custo">Cancelar</button>
+    `, sheet => {
+      const inp = sheet.querySelector('#inp-custo');
+      setTimeout(() => inp.focus(), 50);
+      sheet.querySelector('#save-custo').addEventListener('click', () => {
+        try {
+          DB.atualizarFarm(id, { custo: inp.value });
+          closeSheet();
+          toast('Custo atualizado ✓');
+          renderFarmDetalhes(id);
+        } catch (err) { toast(err.message); }
+      });
+      sheet.querySelector('#cancel-custo').addEventListener('click', closeSheet);
+    });
+  });
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estágio padrão
   const $cancelar = document.getElementById('btn-cancelar-venda');
