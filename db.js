@@ -559,7 +559,8 @@ const DB = (() => {
 
   // ============================================================
   //   RESUMOS PADRONIZADOS — consumidos pelo Dashboard Geral
-  //   Modelo caixa: lucro = receita − investimento; roi = lucro/investimento.
+  //   Modelo REALIZADO: só contas vendidas entram em receita/investimento/
+  //   lucro/ROI. O estoque não entra (é mostrado à parte como capital parado).
   //   Toda nova operação só precisa expor um resumo neste formato.
   // ============================================================
   function roiDe(receita, investimento) {
@@ -568,9 +569,11 @@ const DB = (() => {
 
   function resumoCompraVenda() {
     const vendidas = data.contas.filter(c => c.preco_venda != null);
-    const investimento = data.contas.reduce((s, c) => s + Number(c.preco_compra || 0), 0);
+    const estoqueLista = data.contas.filter(c => c.preco_venda == null);
+    // Investimento e receita só das vendidas (o estoque não entra no ROI/lucro)
+    const investimento = vendidas.reduce((s, c) => s + Number(c.preco_compra || 0), 0);
     const receita = vendidas.reduce((s, c) => s + Number(c.preco_venda || 0), 0);
-    const estoque = data.contas.length - vendidas.length;
+    const capitalEstoque = estoqueLista.reduce((s, c) => s + Number(c.preco_compra || 0), 0);
     const agora = new Date();
     const vendidasMes = vendidas.filter(c => {
       const d = new Date(c.data_venda);
@@ -579,21 +582,23 @@ const DB = (() => {
     return {
       id: 'compra-venda', nome: 'Compra e Venda', rota: '#/contas',
       receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
-      ativas: estoque, concluidas: vendidas.length,
-      extra: { estoque, vendidasMes },
+      ativas: estoqueLista.length, concluidas: vendidas.length,
+      extra: { estoque: estoqueLista.length, capitalEstoque, vendidasMes },
     };
   }
 
   function resumoFarm() {
     const vendidas = data.farm.filter(f => f.preco_venda != null);
-    const investimento = data.farm.reduce((s, f) => s + Number(f.custo || 0), 0);
+    const emFarmLista = data.farm.filter(f => f.preco_venda == null);
+    // Investimento e receita só das vendidas (o custo do que está em farm não entra)
+    const investimento = vendidas.reduce((s, f) => s + Number(f.custo || 0), 0);
     const receita = vendidas.reduce((s, f) => s + Number(f.preco_venda || 0), 0);
-    const emFarm = data.farm.filter(f => f.status !== 'Vendida').length;
+    const capitalFarm = emFarmLista.reduce((s, f) => s + Number(f.custo || 0), 0);
     return {
       id: 'farm', nome: 'Farm', rota: '#/farm',
       receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
-      ativas: emFarm, concluidas: vendidas.length,
-      extra: { emFarm, vendidas: vendidas.length },
+      ativas: emFarmLista.length, concluidas: vendidas.length,
+      extra: { emFarm: emFarmLista.length, capitalFarm, vendidas: vendidas.length },
     };
   }
 
@@ -623,7 +628,8 @@ const DB = (() => {
     return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento), operacoes: ops };
   }
 
-  // Evolução mensal por operação (modelo caixa: entradas − saídas no mês)
+  // Evolução mensal por operação (modelo realizado: lucro da venda no mês da
+  // venda; contas em estoque não entram. Ofertas: receitas − investimento do mês)
   function evolucaoMensal(n = 6) {
     const meses = [];
     const agora = new Date();
@@ -634,12 +640,16 @@ const DB = (() => {
     const bucket = (ano, mes) => meses.find(m => m.ano === ano && m.mes === mes);
 
     data.contas.forEach(c => {
-      if (c.data_compra) { const d = new Date(c.data_compra); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.compraVenda -= Number(c.preco_compra || 0); }
-      if (c.data_venda) { const d = new Date(c.data_venda); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.compraVenda += Number(c.preco_venda || 0); }
+      if (c.preco_venda == null || !c.data_venda) return;
+      const d = new Date(c.data_venda);
+      const b = bucket(d.getFullYear(), d.getMonth());
+      if (b) b.compraVenda += Number(c.preco_venda || 0) - Number(c.preco_compra || 0);
     });
     data.farm.forEach(f => {
-      if (f.data_inicio) { const d = new Date(f.data_inicio); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.farm -= Number(f.custo || 0); }
-      if (f.data_venda) { const d = new Date(f.data_venda); const b = bucket(d.getFullYear(), d.getMonth()); if (b) b.farm += Number(f.preco_venda || 0); }
+      if (f.preco_venda == null || !f.data_venda) return;
+      const d = new Date(f.data_venda);
+      const b = bucket(d.getFullYear(), d.getMonth());
+      if (b) b.farm += Number(f.preco_venda || 0) - Number(f.custo || 0);
     });
     data.ofertas.forEach(o => {
       const b = bucket(o.ano, o.mes);
