@@ -53,11 +53,13 @@ function router() {
   else if (parts[0] === 'backup') renderBackup();
   else if (parts[0] === 'conta' && parts[1]) renderDetalhes(parts[1]);
   else if (parts[0] === 'venda' && parts[1]) renderVenda(parts[1]);
+  else if (parts[0] === 'editar' && parts[1]) renderEditarConta(parts[1]);
   else if (parts[0] === 'farm') {
     if (parts[1] === 'lista') renderFarmLista();
     else if (parts[1] === 'nova') renderFarmCadastro();
     else if (parts[1] === 'conta' && parts[2]) renderFarmDetalhes(parts[2]);
     else if (parts[1] === 'venda' && parts[2]) renderFarmVenda(parts[2]);
+    else if (parts[1] === 'editar' && parts[2]) renderEditarFarm(parts[2]);
     else renderFarmDashboard();
   }
   else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
@@ -625,6 +627,7 @@ function renderDetalhes(id) {
 
     <div style="margin-top:24px;">
       ${!vendida ? `<a class="btn btn-success" href="#/venda/${c.id}">Registrar venda</a>` : ''}
+      <a class="btn btn-secondary" href="#/editar/${c.id}">Editar dados</a>
       ${vendida ? `<button class="btn btn-secondary" id="btn-cancelar-venda">Cancelar venda</button>` : ''}
       <button class="btn btn-danger-ghost" id="btn-excluir">Excluir conta</button>
     </div>
@@ -1121,7 +1124,7 @@ function renderFarmDetalhes(id) {
 
     <h2>Financeiro</h2>
     <div class="card detail-rows">
-      <div class="detail-row"><span class="k">Custo investido</span><span class="v">${fmtBRL(c.custo)} <button class="senha-toggle" id="btn-edit-custo">editar</button></span></div>
+      <div class="detail-row"><span class="k">Custo investido</span><span class="v">${fmtBRL(c.custo)}</span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
       <div class="detail-row"><span class="k">Data da venda</span><span class="v">${fmtData(c.data_venda)}</span></div>
@@ -1146,6 +1149,7 @@ function renderFarmDetalhes(id) {
 
     <div style="margin-top:24px;">
       ${!vendida ? `<a class="btn btn-success" href="#/farm/venda/${c.id}">Registrar venda</a>` : ''}
+      <a class="btn btn-secondary" href="#/farm/editar/${c.id}">Editar dados</a>
       ${vendida ? `<button class="btn btn-secondary" id="btn-cancelar-venda">Cancelar venda</button>` : ''}
       <button class="btn btn-danger-ghost" id="btn-excluir">Excluir conta</button>
     </div>
@@ -1161,31 +1165,6 @@ function renderFarmDetalhes(id) {
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
     });
   }
-
-  // Editar custo investido
-  document.getElementById('btn-edit-custo').addEventListener('click', () => {
-    openSheet(`
-      <h3>Editar custo investido</h3>
-      <div class="form-group">
-        <label>Custo investido (R$)</label>
-        <input id="inp-custo" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo || ''}" placeholder="0,00">
-      </div>
-      <button class="btn btn-primary" id="save-custo">Salvar</button>
-      <button class="btn btn-secondary" id="cancel-custo">Cancelar</button>
-    `, sheet => {
-      const inp = sheet.querySelector('#inp-custo');
-      setTimeout(() => inp.focus(), 50);
-      sheet.querySelector('#save-custo').addEventListener('click', () => {
-        try {
-          DB.atualizarFarm(id, { custo: inp.value });
-          closeSheet();
-          toast('Custo atualizado ✓');
-          renderFarmDetalhes(id);
-        } catch (err) { toast(err.message); }
-      });
-      sheet.querySelector('#cancel-custo').addEventListener('click', closeSheet);
-    });
-  });
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estágio padrão
   const $cancelar = document.getElementById('btn-cancelar-venda');
@@ -1316,6 +1295,152 @@ function renderFarmVenda(id) {
         observacoes: f.get('observacoes'),
       });
       toast('Venda registrada ✓');
+      location.hash = '#/farm/conta/' + id;
+    } catch (err) {
+      const $err = document.getElementById('form-error');
+      $err.textContent = err.message;
+      $err.classList.add('show');
+    }
+  });
+}
+
+/* ============================================================
+   EDITAR CONTA (Compra/Venda)  (#/editar/:id)
+   ============================================================ */
+function renderEditarConta(id) {
+  const c = DB.getConta(id);
+  if (!c) { location.hash = '#/contas'; return; }
+  const vendida = c.preco_venda != null;
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/conta/${id}">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Voltar
+    </a>
+    <div class="page-head"><h1>Editar conta</h1></div>
+
+    <form id="form-editar" novalidate>
+      <div class="form-group">
+        <label>Username <span class="req">*</span></label>
+        <input name="username" type="text" value="${esc(c.username)}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input name="email" type="email" value="${esc(c.email)}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Senha</label>
+        <input name="senha" type="text" value="${esc(c.senha)}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Nome do fornecedor</label>
+        <input name="fornecedor" type="text" value="${esc(c.fornecedor)}">
+      </div>
+      <div class="form-group">
+        <label>Valor da compra (R$) <span class="req">*</span></label>
+        <input name="preco_compra" type="number" inputmode="decimal" step="0.01" min="0" value="${c.preco_compra}">
+      </div>
+      ${vendida ? `
+      <div class="form-group">
+        <label>Valor da venda (R$)</label>
+        <input name="preco_venda" type="number" inputmode="decimal" step="0.01" min="0" value="${c.preco_venda}">
+      </div>` : ''}
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="observacoes">${esc(c.observacoes)}</textarea>
+      </div>
+      <div class="form-error" id="form-error"></div>
+      <button class="btn btn-primary" type="submit">Salvar alterações</button>
+    </form>
+  `;
+
+  document.getElementById('form-editar').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      DB.atualizarConta(id, {
+        username: f.get('username'),
+        email: f.get('email'),
+        senha: f.get('senha'),
+        fornecedor: f.get('fornecedor'),
+        preco_compra: f.get('preco_compra'),
+        preco_venda: f.get('preco_venda'),
+        observacoes: f.get('observacoes'),
+      });
+      toast('Alterações salvas ✓');
+      location.hash = '#/conta/' + id;
+    } catch (err) {
+      const $err = document.getElementById('form-error');
+      $err.textContent = err.message;
+      $err.classList.add('show');
+    }
+  });
+}
+
+/* ============================================================
+   EDITAR CONTA (Farm)  (#/farm/editar/:id)
+   ============================================================ */
+function renderEditarFarm(id) {
+  const c = DB.getFarm(id);
+  if (!c) { location.hash = '#/farm/lista'; return; }
+  const vendida = c.preco_venda != null;
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm/conta/${id}">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Voltar
+    </a>
+    <div class="page-head"><h1>Editar conta</h1></div>
+
+    <form id="form-editar-farm" novalidate>
+      <div class="form-group">
+        <label>Username <span class="req">*</span></label>
+        <input name="username" type="text" value="${esc(c.username)}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Plataforma / tipo</label>
+        <input name="plataforma" type="text" value="${esc(c.plataforma)}">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input name="email" type="email" value="${esc(c.email)}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Senha</label>
+        <input name="senha" type="text" value="${esc(c.senha)}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Custo investido (R$)</label>
+        <input name="custo" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo}">
+      </div>
+      ${vendida ? `
+      <div class="form-group">
+        <label>Valor da venda (R$)</label>
+        <input name="preco_venda" type="number" inputmode="decimal" step="0.01" min="0" value="${c.preco_venda}">
+      </div>` : ''}
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="observacoes">${esc(c.observacoes)}</textarea>
+      </div>
+      <div class="form-error" id="form-error"></div>
+      <button class="btn btn-primary" type="submit">Salvar alterações</button>
+    </form>
+  `;
+
+  document.getElementById('form-editar-farm').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      DB.atualizarFarm(id, {
+        username: f.get('username'),
+        plataforma: f.get('plataforma'),
+        email: f.get('email'),
+        senha: f.get('senha'),
+        custo: f.get('custo'),
+        preco_venda: f.get('preco_venda'),
+        observacoes: f.get('observacoes'),
+      });
+      toast('Alterações salvas ✓');
       location.hash = '#/farm/conta/' + id;
     } catch (err) {
       const $err = document.getElementById('form-error');

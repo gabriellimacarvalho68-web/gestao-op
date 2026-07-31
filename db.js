@@ -152,19 +152,39 @@ const DB = (() => {
   function atualizarConta(id, campos) {
     const conta = getConta(id);
     if (!conta) throw new Error('Conta não encontrada.');
+    let mudou = false;
     if (campos.username != null) {
       const u = String(campos.username).trim();
       if (!u) throw new Error('Username é obrigatório.');
       if (usernameExiste(u, id)) throw new Error('Já existe uma conta com esse username.');
-      conta.username = u;
+      if (u !== conta.username) { conta.username = u; mudou = true; }
     }
     ['email', 'senha', 'fornecedor', 'observacoes'].forEach(k => {
-      if (campos[k] != null) conta[k] = String(campos[k]).trim();
+      if (campos[k] != null) {
+        const v = String(campos[k]).trim();
+        if (v !== conta[k]) { conta[k] = v; mudou = true; }
+      }
     });
-    if (campos.preco_compra != null && !isNaN(Number(campos.preco_compra))) {
-      conta.preco_compra = Number(campos.preco_compra);
-      conta.lucro = calcLucro(conta);
+    if (campos.preco_compra != null && campos.preco_compra !== '' &&
+        !isNaN(Number(campos.preco_compra)) && Number(campos.preco_compra) >= 0) {
+      const anterior = conta.preco_compra;
+      if (Number(campos.preco_compra) !== anterior) {
+        conta.preco_compra = Number(campos.preco_compra);
+        conta.lucro = calcLucro(conta);
+        addHistorico(id, 'Compra atualizada', `De ${fmtBRL(anterior)} para ${fmtBRL(conta.preco_compra)}.`);
+      }
     }
+    // Valor da venda só é editável quando a conta já foi vendida
+    if (conta.preco_venda != null && campos.preco_venda != null && campos.preco_venda !== '' &&
+        !isNaN(Number(campos.preco_venda)) && Number(campos.preco_venda) >= 0) {
+      const anterior = conta.preco_venda;
+      if (Number(campos.preco_venda) !== anterior) {
+        conta.preco_venda = Number(campos.preco_venda);
+        conta.lucro = calcLucro(conta);
+        addHistorico(id, 'Venda atualizada', `De ${fmtBRL(anterior)} para ${fmtBRL(conta.preco_venda)}.`);
+      }
+    }
+    if (mudou) addHistorico(id, 'Dados atualizados', 'Informações da conta editadas.');
     conta.atualizado_em = now();
     persist();
     return conta;
@@ -304,23 +324,38 @@ const DB = (() => {
   function atualizarFarm(id, campos) {
     const f = getFarm(id);
     if (!f) throw new Error('Conta não encontrada.');
+    let mudou = false;
     if (campos.username != null) {
       const u = String(campos.username).trim();
       if (!u) throw new Error('Username é obrigatório.');
       if (farmUsernameExiste(u, id)) throw new Error('Já existe uma conta em farm com esse username.');
-      f.username = u;
+      if (u !== f.username) { f.username = u; mudou = true; }
     }
     ['plataforma', 'email', 'senha', 'observacoes'].forEach(k => {
-      if (campos[k] != null) f[k] = String(campos[k]).trim();
+      if (campos[k] != null) {
+        const v = String(campos[k]).trim();
+        if (v !== f[k]) { f[k] = v; mudou = true; }
+      }
     });
     if (campos.custo != null && campos.custo !== '' && !isNaN(Number(campos.custo)) && Number(campos.custo) >= 0) {
       const anterior = f.custo;
-      f.custo = Number(campos.custo);
-      f.lucro = calcLucroFarm(f);
-      if (anterior !== f.custo) {
+      if (Number(campos.custo) !== anterior) {
+        f.custo = Number(campos.custo);
+        f.lucro = calcLucroFarm(f);
         addFarmHistorico(id, 'Custo atualizado', `De ${fmtBRL(anterior)} para ${fmtBRL(f.custo)}.`);
       }
     }
+    // Valor da venda só é editável quando a conta já foi vendida
+    if (f.preco_venda != null && campos.preco_venda != null && campos.preco_venda !== '' &&
+        !isNaN(Number(campos.preco_venda)) && Number(campos.preco_venda) >= 0) {
+      const anterior = f.preco_venda;
+      if (Number(campos.preco_venda) !== anterior) {
+        f.preco_venda = Number(campos.preco_venda);
+        f.lucro = calcLucroFarm(f);
+        addFarmHistorico(id, 'Venda atualizada', `De ${fmtBRL(anterior)} para ${fmtBRL(f.preco_venda)}.`);
+      }
+    }
+    if (mudou) addFarmHistorico(id, 'Dados atualizados', 'Informações da conta editadas.');
     f.atualizado_em = now();
     persist();
     return f;
