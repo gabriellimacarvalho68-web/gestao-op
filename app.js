@@ -34,9 +34,11 @@ function badgeSlug(status) {
   return String(status || '').replace(/\s+/g, '');
 }
 
-// Formata porcentagem no padrão pt-BR (ex.: 12,5%). Negativo já vem com '-'.
-function fmtPct(v) {
-  return Number(v || 0).toFixed(1).replace('.', ',') + '%';
+// ROI como multiplicador (ex.: 2.0x = dobrou). Retorno = receita / investimento.
+// 1.0x = empatou; acima = lucro; abaixo = prejuízo; "—" quando não há investimento.
+function fmtMultiplo(receita, investimento) {
+  if (!investimento || Number(investimento) <= 0) return '—';
+  return (Number(receita) / Number(investimento)).toFixed(1) + 'x';
 }
 
 /* ============================================================
@@ -148,7 +150,7 @@ function opCardHTML(op) {
       <div class="op-metrics">
         <div><span class="m-label">Receita</span><span class="m-val">${fmtBRL(op.receita)}</span></div>
         <div><span class="m-label">Investimento</span><span class="m-val">${fmtBRL(op.investimento)}</span></div>
-        <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${fmtPct(op.roi)}</span></div>
+        <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${fmtMultiplo(op.receita, op.investimento)}</span></div>
       </div>
       <div class="op-extra">${extra}<span class="op-chevron">›</span></div>
     </a>`;
@@ -179,7 +181,7 @@ function renderDashboard() {
     <div class="geral-card">
       <div class="geral-top">
         <span class="geral-label">Lucro total</span>
-        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${fmtPct(g.roi)}</span>
+        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${fmtMultiplo(g.receita, g.investimento)}</span>
       </div>
       <div class="geral-lucro ${g.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(g.lucro)}</div>
       <div class="geral-metrics">
@@ -1501,7 +1503,7 @@ function renderOfertas(param) {
       <div class="stat wide">
         <div class="label">Lucro total</div>
         <div class="value ${res.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(res.lucro)}</div>
-        <div class="sub">ROI de ${fmtPct(res.roi)}</div>
+        <div class="sub">ROI de ${fmtMultiplo(res.receita, res.investimento)}</div>
       </div>
       <div class="stat">
         <div class="label">Receita total</div>
@@ -1526,7 +1528,7 @@ function renderOfertas(param) {
       </div>
       <div class="detail-row"><span class="k">Receita do mês</span><span class="v">${fmtBRL(receitaMes)}</span></div>
       <div class="detail-row"><span class="k">Lucro do mês</span><span class="v ${lucroMes >= 0 ? 'pos' : 'neg'}">${fmtBRL(lucroMes)}</span></div>
-      <div class="detail-row"><span class="k">ROI do mês</span><span class="v ${roiMes >= 0 ? 'pos' : 'neg'}">${investimento > 0 ? fmtPct(roiMes) : '—'}</span></div>
+      <div class="detail-row"><span class="k">ROI do mês</span><span class="v ${roiMes >= 0 ? 'pos' : 'neg'}">${fmtMultiplo(receitaMes, investimento)}</span></div>
     </div>
 
     <div class="section-row">

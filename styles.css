@@ -25,6 +25,10 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Esconde a barra de rolagem (visual de app, não de site) */
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
