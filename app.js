@@ -166,9 +166,17 @@ function atividadeItemHTML(a) {
     </a>`;
 }
 
+// Estado do dashboard (persiste enquanto navega): período do card azul e atividade
+const PERIODOS = ['mes', '6meses', 'tudo'];
+const PERIODO_LABEL = { mes: 'Este mês', '6meses': 'Últimos 6 meses', tudo: 'Tudo (acumulado)' };
+const dashState = { periodo: '6meses', atividadeAberta: false };
+
 function renderDashboard() {
-  const g = DB.resumoGeral();
-  const atividade = DB.atividadeRecente(8);
+  const g = DB.resumoGeralPeriodo(dashState.periodo);
+  const ops = DB.resumoGeral().operacoes;
+  const atividade = DB.atividadeRecente(12);
+  const aberta = dashState.atividadeAberta;
+  const mostradas = aberta ? atividade : atividade.slice(0, 1);
 
   $view.innerHTML = `
     <div class="page-head">
@@ -177,9 +185,14 @@ function renderDashboard() {
     </div>
 
     <div class="geral-card">
+      <div class="geral-period">
+        <button class="gp-arrow" id="periodo-prev" aria-label="Período anterior">‹</button>
+        <span class="gp-label">${PERIODO_LABEL[dashState.periodo]}</span>
+        <button class="gp-arrow" id="periodo-next" aria-label="Próximo período">›</button>
+      </div>
       <div class="geral-top">
-        <span class="geral-label">Lucro total</span>
-        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${fmtPct(g.roi)}</span>
+        <span class="geral-label">Lucro</span>
+        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${g.investimento > 0 ? fmtPct(g.roi) : '—'}</span>
       </div>
       <div class="geral-lucro ${g.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(g.lucro)}</div>
       <div class="geral-metrics">
@@ -190,7 +203,7 @@ function renderDashboard() {
 
     <h2>Operações</h2>
     <div class="op-list">
-      ${g.operacoes.map(opCardHTML).join('')}
+      ${ops.map(opCardHTML).join('')}
     </div>
 
     <h2>Evolução mensal</h2>
@@ -203,10 +216,24 @@ function renderDashboard() {
     <h2>Atividade recente</h2>
     <div class="card activity">
       ${atividade.length
-        ? atividade.map(atividadeItemHTML).join('')
+        ? mostradas.map(atividadeItemHTML).join('')
         : `<div class="empty" style="padding:24px;"><p>Nada por aqui ainda.<br>Suas ações vão aparecer nesta lista.</p></div>`}
     </div>
+    ${atividade.length > 1
+      ? `<button class="ver-mais" id="toggle-atividade">${aberta ? 'Ver menos' : 'Ver mais (' + (atividade.length - 1) + ')'}<span class="vm-arrow ${aberta ? 'up' : ''}">⌄</span></button>`
+      : ''}
   `;
+
+  const cicla = dir => {
+    const i = PERIODOS.indexOf(dashState.periodo);
+    dashState.periodo = PERIODOS[(i + dir + PERIODOS.length) % PERIODOS.length];
+    renderDashboard();
+  };
+  document.getElementById('periodo-prev').addEventListener('click', () => cicla(-1));
+  document.getElementById('periodo-next').addEventListener('click', () => cicla(1));
+
+  const $ta = document.getElementById('toggle-atividade');
+  if ($ta) $ta.addEventListener('click', () => { dashState.atividadeAberta = !dashState.atividadeAberta; renderDashboard(); });
 
   renderChartOperacoes(
     document.getElementById('chart-wrap'),

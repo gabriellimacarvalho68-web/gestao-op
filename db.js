@@ -628,6 +628,39 @@ const DB = (() => {
     return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento), operacoes: ops };
   }
 
+  // Resumo geral filtrado por período (modelo realizado, pela data da venda).
+  // periodo: 'mes' | '6meses' | 'tudo'
+  function resumoGeralPeriodo(periodo) {
+    const agora = new Date();
+    let desde = null;
+    if (periodo === 'mes') desde = new Date(agora.getFullYear(), agora.getMonth(), 1);
+    else if (periodo === '6meses') desde = new Date(agora.getFullYear(), agora.getMonth() - 5, 1);
+    const desdeISO = desde ? desde.toISOString() : null;
+    const noRange = iso => !desdeISO || (iso && iso >= desdeISO);
+    const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
+
+    let receita = 0, investimento = 0;
+    data.contas.forEach(c => {
+      if (c.preco_venda != null && noRange(c.data_venda)) {
+        receita += Number(c.preco_venda || 0);
+        investimento += Number(c.preco_compra || 0);
+      }
+    });
+    data.farm.forEach(f => {
+      if (f.preco_venda != null && noRange(f.data_venda)) {
+        receita += Number(f.preco_venda || 0);
+        investimento += Number(f.custo || 0);
+      }
+    });
+    data.ofertas.forEach(o => {
+      if (mesNoRange(o.ano, o.mes)) {
+        receita += totalReceitasMes(o);
+        investimento += Number(o.investimento || 0);
+      }
+    });
+    return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento) };
+  }
+
   // Evolução mensal por operação (modelo realizado: lucro da venda no mês da
   // venda; contas em estoque não entram. Ofertas: receitas − investimento do mês)
   function evolucaoMensal(n = 6) {
@@ -786,7 +819,7 @@ const DB = (() => {
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, listarOfertasMeses, historicoDasOfertas, totalReceitasMes,
-    resumoCompraVenda, resumoFarm, resumoOfertas, resumosOperacoes, resumoGeral,
+    resumoCompraVenda, resumoFarm, resumoOfertas, resumosOperacoes, resumoGeral, resumoGeralPeriodo,
     evolucaoMensal, atividadeRecente,
     exportar, importar, totais,
   };
