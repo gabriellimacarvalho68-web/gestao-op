@@ -560,39 +560,49 @@ const DB = (() => {
   // ============================================================
   //   RESUMOS PADRONIZADOS — consumidos pelo Dashboard Geral
   //   Modelo REALIZADO: só contas vendidas entram em receita/investimento/
-  //   lucro/ROI. O estoque não entra (é mostrado à parte como capital parado).
+  //   lucro/ROI. O estoque não entra (mostrado à parte como capital parado).
+  //   Cada resumo aceita um período: 'mes' | '6meses' | 'tudo'.
   //   Toda nova operação só precisa expor um resumo neste formato.
   // ============================================================
   function roiDe(receita, investimento) {
     return investimento > 0 ? ((receita - investimento) / investimento) * 100 : 0;
   }
 
-  function resumoCompraVenda() {
-    const vendidas = data.contas.filter(c => c.preco_venda != null);
-    const estoqueLista = data.contas.filter(c => c.preco_venda == null);
-    // Investimento e receita só das vendidas (o estoque não entra no ROI/lucro)
+  // Data inicial do período (null = tudo). Filtra pela data de realização.
+  function inicioPeriodo(periodo) {
+    const agora = new Date();
+    if (periodo === 'mes') return new Date(agora.getFullYear(), agora.getMonth(), 1);
+    if (periodo === '6meses') return new Date(agora.getFullYear(), agora.getMonth() - 5, 1);
+    return null; // 'tudo'
+  }
+
+  function resumoCompraVenda(periodo) {
+    const desde = inicioPeriodo(periodo);
+    const desdeISO = desde ? desde.toISOString() : null;
+    const noRange = iso => !desdeISO || (iso && iso >= desdeISO);
+    // Receita/investimento só das vendidas no período
+    const vendidas = data.contas.filter(c => c.preco_venda != null && noRange(c.data_venda));
     const investimento = vendidas.reduce((s, c) => s + Number(c.preco_compra || 0), 0);
     const receita = vendidas.reduce((s, c) => s + Number(c.preco_venda || 0), 0);
+    // Estoque é sempre o estado atual (não depende do período)
+    const estoqueLista = data.contas.filter(c => c.preco_venda == null);
     const capitalEstoque = estoqueLista.reduce((s, c) => s + Number(c.preco_compra || 0), 0);
-    const agora = new Date();
-    const vendidasMes = vendidas.filter(c => {
-      const d = new Date(c.data_venda);
-      return d.getFullYear() === agora.getFullYear() && d.getMonth() === agora.getMonth();
-    }).length;
     return {
       id: 'compra-venda', nome: 'Compra e Venda', rota: '#/contas',
       receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
       ativas: estoqueLista.length, concluidas: vendidas.length,
-      extra: { estoque: estoqueLista.length, capitalEstoque, vendidasMes },
+      extra: { estoque: estoqueLista.length, capitalEstoque, vendidas: vendidas.length },
     };
   }
 
-  function resumoFarm() {
-    const vendidas = data.farm.filter(f => f.preco_venda != null);
-    const emFarmLista = data.farm.filter(f => f.preco_venda == null);
-    // Investimento e receita só das vendidas (o custo do que está em farm não entra)
+  function resumoFarm(periodo) {
+    const desde = inicioPeriodo(periodo);
+    const desdeISO = desde ? desde.toISOString() : null;
+    const noRange = iso => !desdeISO || (iso && iso >= desdeISO);
+    const vendidas = data.farm.filter(f => f.preco_venda != null && noRange(f.data_venda));
     const investimento = vendidas.reduce((s, f) => s + Number(f.custo || 0), 0);
     const receita = vendidas.reduce((s, f) => s + Number(f.preco_venda || 0), 0);
+    const emFarmLista = data.farm.filter(f => f.preco_venda == null);
     const capitalFarm = emFarmLista.reduce((s, f) => s + Number(f.custo || 0), 0);
     return {
       id: 'farm', nome: 'Farm', rota: '#/farm',
@@ -602,63 +612,39 @@ const DB = (() => {
     };
   }
 
-  function resumoOfertas() {
-    const investimento = data.ofertas.reduce((s, o) => s + Number(o.investimento || 0), 0);
-    const receita = data.ofertas.reduce((s, o) => s + totalReceitasMes(o), 0);
+  function resumoOfertas(periodo) {
+    const desde = inicioPeriodo(periodo);
+    const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
+    const meses = data.ofertas.filter(o => mesNoRange(o.ano, o.mes));
+    const investimento = meses.reduce((s, o) => s + Number(o.investimento || 0), 0);
+    const receita = meses.reduce((s, o) => s + totalReceitasMes(o), 0);
     const agora = new Date();
     const mesAtual = getOfertaMes(agora.getFullYear(), agora.getMonth());
     const lancamentosMes = mesAtual ? mesAtual.receitas.length : 0;
     return {
       id: 'ofertas', nome: 'Grupo de Ofertas', rota: '#/ofertas',
       receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
-      ativas: data.ofertas.length, concluidas: 0,
+      ativas: meses.length, concluidas: 0,
       extra: { lancamentosMes },
     };
   }
 
   // Registro de operações — adicionar uma nova é só incluir seu resumo aqui.
-  function resumosOperacoes() {
-    return [resumoCompraVenda(), resumoFarm(), resumoOfertas()];
+  function resumosOperacoes(periodo) {
+    return [resumoCompraVenda(periodo), resumoFarm(periodo), resumoOfertas(periodo)];
   }
 
-  function resumoGeral() {
-    const ops = resumosOperacoes();
+  function resumoGeral(periodo) {
+    const ops = resumosOperacoes(periodo);
     const receita = ops.reduce((s, o) => s + o.receita, 0);
     const investimento = ops.reduce((s, o) => s + o.investimento, 0);
     return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento), operacoes: ops };
   }
 
-  // Resumo geral filtrado por período (modelo realizado, pela data da venda).
+  // Resumo geral filtrado por período (soma dos resumos das operações).
   // periodo: 'mes' | '6meses' | 'tudo'
   function resumoGeralPeriodo(periodo) {
-    const agora = new Date();
-    let desde = null;
-    if (periodo === 'mes') desde = new Date(agora.getFullYear(), agora.getMonth(), 1);
-    else if (periodo === '6meses') desde = new Date(agora.getFullYear(), agora.getMonth() - 5, 1);
-    const desdeISO = desde ? desde.toISOString() : null;
-    const noRange = iso => !desdeISO || (iso && iso >= desdeISO);
-    const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
-
-    let receita = 0, investimento = 0;
-    data.contas.forEach(c => {
-      if (c.preco_venda != null && noRange(c.data_venda)) {
-        receita += Number(c.preco_venda || 0);
-        investimento += Number(c.preco_compra || 0);
-      }
-    });
-    data.farm.forEach(f => {
-      if (f.preco_venda != null && noRange(f.data_venda)) {
-        receita += Number(f.preco_venda || 0);
-        investimento += Number(f.custo || 0);
-      }
-    });
-    data.ofertas.forEach(o => {
-      if (mesNoRange(o.ano, o.mes)) {
-        receita += totalReceitasMes(o);
-        investimento += Number(o.investimento || 0);
-      }
-    });
-    return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento) };
+    return resumoGeral(periodo);
   }
 
   // Evolução mensal por operação (modelo realizado: lucro da venda no mês da

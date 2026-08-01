@@ -135,8 +135,8 @@ const OP_SLUG = { 'Compra/Venda': 'cv', 'Farm': 'farm', 'Ofertas': 'ofertas' };
 function opCardHTML(op) {
   const cor = OP_COR[op.id] || '#007AFF';
   let extra = '';
-  if (op.id === 'compra-venda') extra = `${op.extra.estoque} em estoque (${fmtBRL(op.extra.capitalEstoque)}) · ${op.extra.vendidasMes} vend./mês`;
-  else if (op.id === 'farm') extra = `${op.extra.emFarm} em farm (${fmtBRL(op.extra.capitalFarm)}) · ${op.extra.vendidas} vendida(s)`;
+  if (op.id === 'compra-venda') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.estoque} em estoque (${fmtBRL(op.extra.capitalEstoque)})`;
+  else if (op.id === 'farm') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.emFarm} em farm (${fmtBRL(op.extra.capitalFarm)})`;
   else if (op.id === 'ofertas') extra = `${op.extra.lancamentosMes} lançamento(s) no mês`;
   return `
     <a class="op-card" href="${op.rota}" style="--op-cor:${cor}">
@@ -148,7 +148,7 @@ function opCardHTML(op) {
       <div class="op-metrics">
         <div><span class="m-label">Receita</span><span class="m-val">${fmtBRL(op.receita)}</span></div>
         <div><span class="m-label">Investimento</span><span class="m-val">${fmtBRL(op.investimento)}</span></div>
-        <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${fmtPct(op.roi)}</span></div>
+        <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${op.investimento > 0 ? fmtPct(op.roi) : '—'}</span></div>
       </div>
       <div class="op-extra">${extra}<span class="op-chevron">›</span></div>
     </a>`;
@@ -173,7 +173,7 @@ const dashState = { periodo: '6meses', atividadeAberta: false };
 
 function renderDashboard() {
   const g = DB.resumoGeralPeriodo(dashState.periodo);
-  const ops = DB.resumoGeral().operacoes;
+  const ops = DB.resumosOperacoes('mes'); // cards de operação = mês atual
   const atividade = DB.atividadeRecente(12);
   const aberta = dashState.atividadeAberta;
   const mostradas = aberta ? atividade : atividade.slice(0, 1);
@@ -201,7 +201,10 @@ function renderDashboard() {
       </div>
     </div>
 
-    <h2>Operações</h2>
+    <div class="section-row">
+      <h2>Operações</h2>
+      <span class="sec-note">este mês</span>
+    </div>
     <div class="op-list">
       ${ops.map(opCardHTML).join('')}
     </div>
