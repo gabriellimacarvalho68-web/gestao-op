@@ -137,7 +137,7 @@ function opCardHTML(op) {
   let extra = '';
   if (op.id === 'compra-venda') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.estoque} em estoque (${fmtBRL(op.extra.capitalEstoque)})`;
   else if (op.id === 'farm') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.emFarm} em farm (${fmtBRL(op.extra.capitalFarm)})`;
-  else if (op.id === 'ofertas') extra = `${op.extra.lancamentosMes} lançamento(s) no mês`;
+  else if (op.id === 'ofertas') extra = `${op.extra.nichos} nicho(s) · ${op.extra.lancamentosMes} lançamento(s) no mês`;
   return `
     <a class="op-card" href="${op.rota}" style="--op-cor:${cor}">
       <div class="op-head">
@@ -1495,7 +1495,17 @@ function receitaRowHTML(r) {
     </div>`;
 }
 
+let ofertaGrupoId = null; // nicho selecionado (persiste enquanto navega)
+
 function renderOfertas(param) {
+  const grupos = DB.listarGruposOferta();
+  if (!ofertaGrupoId || !grupos.some(g => g.id === ofertaGrupoId)) {
+    ofertaGrupoId = grupos[0] ? grupos[0].id : null;
+  }
+  const grupo = grupos.find(g => g.id === ofertaGrupoId) || null;
+  const gIdx = grupos.findIndex(g => g.id === ofertaGrupoId);
+  const umNicho = grupos.length < 2;
+
   const agora = new Date();
   let ano = agora.getFullYear(), mes = agora.getMonth();
   if (param && /^\d{4}-\d{2}$/.test(param)) {
@@ -1504,8 +1514,8 @@ function renderOfertas(param) {
   }
   const paramAtual = ano + '-' + String(mes + 1).padStart(2, '0');
 
-  const res = DB.resumoOfertas();
-  const o = DB.getOfertaMes(ano, mes);
+  const res = grupo ? DB.resumoOfertasGrupo(grupo.id, 'tudo') : { receita: 0, investimento: 0, lucro: 0, roi: 0 };
+  const o = grupo ? DB.getOfertaMes(grupo.id, ano, mes) : null;
   const investimento = o ? o.investimento : 0;
   const receitas = o ? [...o.receitas].sort((a, b) => (b.data || '').localeCompare(a.data || '')) : [];
   const receitaMes = receitas.reduce((s, r) => s + Number(r.valor || 0), 0);
@@ -1523,24 +1533,27 @@ function renderOfertas(param) {
       Início
     </a>
     <div class="page-head">
-      <h1>Grupo de Ofertas</h1>
-      <div class="subtitle">Financeiro das ofertas de afiliado</div>
+      <div class="page-head-row">
+        <div><h1>Grupo de Ofertas</h1><div class="subtitle">Financeiro das ofertas de afiliado</div></div>
+        <button class="btn-small" id="btn-novo-nicho">+ Nicho</button>
+      </div>
     </div>
+
+    <div class="month-switch">
+      <button class="ms-arrow" id="grupo-prev" aria-label="Nicho anterior" ${umNicho ? 'disabled' : ''}>‹</button>
+      <span class="ms-label">${grupo ? esc(grupo.nome) : 'Sem nicho'}</span>
+      <button class="ms-arrow" id="grupo-next" aria-label="Próximo nicho" ${umNicho ? 'disabled' : ''}>›</button>
+    </div>
+    <button class="ver-mais" id="btn-editar-nicho">renomear ou excluir este nicho</button>
 
     <div class="stats-grid">
       <div class="stat wide">
-        <div class="label">Lucro total</div>
+        <div class="label">Lucro do nicho</div>
         <div class="value ${res.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(res.lucro)}</div>
-        <div class="sub">ROI de ${fmtPct(res.roi)}</div>
+        <div class="sub">ROI de ${res.investimento > 0 ? fmtPct(res.roi) : '—'}</div>
       </div>
-      <div class="stat">
-        <div class="label">Receita total</div>
-        <div class="value">${fmtBRL(res.receita)}</div>
-      </div>
-      <div class="stat">
-        <div class="label">Investimento total</div>
-        <div class="value">${fmtBRL(res.investimento)}</div>
-      </div>
+      <div class="stat"><div class="label">Receita</div><div class="value">${fmtBRL(res.receita)}</div></div>
+      <div class="stat"><div class="label">Investimento</div><div class="value">${fmtBRL(res.investimento)}</div></div>
     </div>
 
     <div class="month-switch">
@@ -1570,10 +1583,82 @@ function renderOfertas(param) {
     </div>
   `;
 
+  // Trocar de nicho (setinhas)
+  const irGrupo = dir => {
+    if (grupos.length < 2) return;
+    const n = (gIdx + dir + grupos.length) % grupos.length;
+    ofertaGrupoId = grupos[n].id;
+    renderOfertas(paramAtual);
+  };
+  document.getElementById('grupo-prev').addEventListener('click', () => irGrupo(-1));
+  document.getElementById('grupo-next').addEventListener('click', () => irGrupo(1));
+
+  // Novo nicho
+  document.getElementById('btn-novo-nicho').addEventListener('click', () => {
+    openSheet(`
+      <h3>Novo nicho</h3>
+      <div class="form-group">
+        <label>Nome do nicho</label>
+        <input id="inp-nicho" type="text" placeholder="Ex.: Emagrecimento">
+      </div>
+      <button class="btn btn-primary" id="save-nicho">Criar nicho</button>
+      <button class="btn btn-secondary" id="cancel-nicho">Cancelar</button>
+    `, sheet => {
+      const inp = sheet.querySelector('#inp-nicho');
+      setTimeout(() => inp.focus(), 50);
+      sheet.querySelector('#save-nicho').addEventListener('click', () => {
+        try {
+          const g = DB.criarGrupoOferta(inp.value);
+          ofertaGrupoId = g.id;
+          closeSheet();
+          toast('Nicho criado ✓');
+          renderOfertas(paramAtual);
+        } catch (err) { toast(err.message); }
+      });
+      sheet.querySelector('#cancel-nicho').addEventListener('click', closeSheet);
+    });
+  });
+
+  // Renomear / excluir nicho
+  document.getElementById('btn-editar-nicho').addEventListener('click', () => {
+    if (!grupo) return;
+    openSheet(`
+      <h3>Nicho</h3>
+      <div class="form-group">
+        <label>Nome do nicho</label>
+        <input id="inp-nicho" type="text" value="${esc(grupo.nome)}">
+      </div>
+      <button class="btn btn-primary" id="save-nicho">Salvar nome</button>
+      ${grupos.length > 1 ? `<button class="btn btn-danger-ghost" id="del-nicho">Excluir este nicho</button>` : ''}
+      <button class="btn btn-secondary" id="cancel-nicho">Cancelar</button>
+    `, sheet => {
+      sheet.querySelector('#save-nicho').addEventListener('click', () => {
+        try {
+          DB.renomearGrupoOferta(grupo.id, sheet.querySelector('#inp-nicho').value);
+          closeSheet();
+          toast('Nicho renomeado ✓');
+          renderOfertas(paramAtual);
+        } catch (err) { toast(err.message); }
+      });
+      const del = sheet.querySelector('#del-nicho');
+      if (del) del.addEventListener('click', () => {
+        if (confirm(`Excluir o nicho "${grupo.nome}"? Todos os lançamentos dele serão apagados.`)) {
+          DB.excluirGrupoOferta(grupo.id);
+          ofertaGrupoId = null;
+          closeSheet();
+          toast('Nicho excluído');
+          renderOfertas(paramAtual);
+        }
+      });
+      sheet.querySelector('#cancel-nicho').addEventListener('click', closeSheet);
+    });
+  });
+
   // Definir/editar investimento do mês
   document.getElementById('btn-invest').addEventListener('click', () => {
+    if (!grupo) return;
     openSheet(`
-      <h3>Investimento de ${mesLabel}</h3>
+      <h3>Investimento de ${mesLabel} — ${esc(grupo.nome)}</h3>
       <div class="form-group">
         <label>Quanto você vai investir neste mês (R$)</label>
         <input id="inp-invest" type="number" inputmode="decimal" step="0.01" min="0" value="${investimento || ''}" placeholder="0,00">
@@ -1585,7 +1670,7 @@ function renderOfertas(param) {
       setTimeout(() => inp.focus(), 50);
       sheet.querySelector('#save-invest').addEventListener('click', () => {
         try {
-          DB.definirInvestimentoMes(ano, mes, inp.value);
+          DB.definirInvestimentoMes(grupo.id, ano, mes, inp.value);
           closeSheet();
           toast('Investimento salvo ✓');
           renderOfertas(paramAtual);
@@ -1597,12 +1682,13 @@ function renderOfertas(param) {
 
   // Lançar receita
   document.getElementById('btn-add-receita').addEventListener('click', () => {
+    if (!grupo) return;
     const ehMesAtual = (ano === agora.getFullYear() && mes === agora.getMonth());
     const dataDefault = ehMesAtual
       ? agora.getFullYear() + '-' + String(agora.getMonth() + 1).padStart(2, '0') + '-' + String(agora.getDate()).padStart(2, '0')
       : `${ano}-${String(mes + 1).padStart(2, '0')}-01`;
     openSheet(`
-      <h3>Lançar receita — ${mesLabel}</h3>
+      <h3>Lançar receita — ${esc(grupo.nome)}</h3>
       <div class="form-group">
         <label>Valor recebido (R$)</label>
         <input id="inp-rval" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
@@ -1632,7 +1718,7 @@ function renderOfertas(param) {
       sheet.querySelector('#save-receita').addEventListener('click', () => {
         try {
           const dataStr = sheet.querySelector('#inp-rdata').value;
-          DB.adicionarReceitaOferta(ano, mes, {
+          DB.adicionarReceitaOferta(grupo.id, ano, mes, {
             valor: val.value,
             data: dataStr ? new Date(dataStr + 'T12:00:00').toISOString() : null,
             categoria: sheet.querySelector('#inp-rcat').value,

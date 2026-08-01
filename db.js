@@ -37,10 +37,11 @@ const DB = (() => {
         obj.farm_historico = obj.farm_historico || [];
         obj.ofertas = obj.ofertas || [];
         obj.ofertas_historico = obj.ofertas_historico || [];
+        obj.ofertas_grupos = obj.ofertas_grupos || [];
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], ofertas: [], ofertas_historico: [] };
+    return { contas: [], historico: [], farm: [], farm_historico: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [] };
   }
 
   let data = load();
@@ -480,18 +481,65 @@ const DB = (() => {
   //   Investimento único por mês (definido no início) + receitas
   //   lançadas ao longo do mês (ex.: semanalmente).
   // ============================================================
-  function getOfertaMes(ano, mes) {
-    return data.ofertas.find(o => o.ano === ano && o.mes === mes) || null;
+  // ---- Nichos (grupos) do Grupo de Ofertas ----
+  // Garante ao menos um nicho e migra registros antigos (sem grupo_id) para ele.
+  function garantirGruposOferta() {
+    let mudou = false;
+    if (data.ofertas_grupos.length === 0) {
+      data.ofertas_grupos.push({ id: uuid(), nome: 'Nicho 1', criado_em: now() });
+      mudou = true;
+    }
+    const primeiro = data.ofertas_grupos[0];
+    data.ofertas.forEach(o => { if (!o.grupo_id) { o.grupo_id = primeiro.id; mudou = true; } });
+    if (mudou) persist();
+    return data.ofertas_grupos;
+  }
+
+  function listarGruposOferta() {
+    garantirGruposOferta();
+    return [...data.ofertas_grupos].sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  }
+
+  function criarGrupoOferta(nome) {
+    nome = String(nome || '').trim();
+    if (!nome) throw new Error('Dê um nome ao nicho.');
+    garantirGruposOferta();
+    const g = { id: uuid(), nome, criado_em: now() };
+    data.ofertas_grupos.push(g);
+    persist();
+    return g;
+  }
+
+  function renomearGrupoOferta(id, nome) {
+    nome = String(nome || '').trim();
+    if (!nome) throw new Error('Dê um nome ao nicho.');
+    const g = data.ofertas_grupos.find(x => x.id === id);
+    if (!g) throw new Error('Nicho não encontrado.');
+    g.nome = nome;
+    persist();
+    return g;
+  }
+
+  function excluirGrupoOferta(id) {
+    const mesesIds = data.ofertas.filter(o => o.grupo_id === id).map(o => o.id);
+    data.ofertas_grupos = data.ofertas_grupos.filter(g => g.id !== id);
+    data.ofertas = data.ofertas.filter(o => o.grupo_id !== id);
+    data.ofertas_historico = data.ofertas_historico.filter(h => !mesesIds.includes(h.oferta_id));
+    persist();
+  }
+
+  function getOfertaMes(grupoId, ano, mes) {
+    return data.ofertas.find(o => o.grupo_id === grupoId && o.ano === ano && o.mes === mes) || null;
   }
 
   function getOfertaMesId(id) {
     return data.ofertas.find(o => o.id === id) || null;
   }
 
-  function garantirMes(ano, mes) {
-    let o = getOfertaMes(ano, mes);
+  function garantirMes(grupoId, ano, mes) {
+    let o = getOfertaMes(grupoId, ano, mes);
     if (!o) {
-      o = { id: uuid(), ano, mes, investimento: 0, receitas: [], criado_em: now(), atualizado_em: now() };
+      o = { id: uuid(), grupo_id: grupoId, ano, mes, investimento: 0, receitas: [], criado_em: now(), atualizado_em: now() };
       data.ofertas.push(o);
     }
     return o;
@@ -501,10 +549,10 @@ const DB = (() => {
     return o.receitas.reduce((s, r) => s + Number(r.valor || 0), 0);
   }
 
-  function definirInvestimentoMes(ano, mes, valor) {
+  function definirInvestimentoMes(grupoId, ano, mes, valor) {
     if (valor == null || valor === '' || isNaN(Number(valor)) || Number(valor) < 0)
       throw new Error('Informe um valor de investimento válido.');
-    const o = garantirMes(ano, mes);
+    const o = garantirMes(grupoId, ano, mes);
     const anterior = o.investimento;
     o.investimento = Number(valor);
     o.atualizado_em = now();
@@ -518,10 +566,10 @@ const DB = (() => {
     return o;
   }
 
-  function adicionarReceitaOferta(ano, mes, { valor, data: dataReceita, categoria, descricao }) {
+  function adicionarReceitaOferta(grupoId, ano, mes, { valor, data: dataReceita, categoria, descricao }) {
     if (valor == null || valor === '' || isNaN(Number(valor)))
       throw new Error('Informe um valor de receita válido.');
-    const o = garantirMes(ano, mes);
+    const o = garantirMes(grupoId, ano, mes);
     const receita = {
       id: uuid(),
       valor: Number(valor),
@@ -545,10 +593,6 @@ const DB = (() => {
     o.atualizado_em = now();
     persist();
     return o;
-  }
-
-  function listarOfertasMeses() {
-    return [...data.ofertas].sort((a, b) => (b.ano - a.ano) || (b.mes - a.mes));
   }
 
   function historicoDasOfertas(mesId) {
@@ -612,6 +656,7 @@ const DB = (() => {
     };
   }
 
+  // Resumo COMBINADO de todos os nichos (usado no card do dashboard)
   function resumoOfertas(periodo) {
     const desde = inicioPeriodo(periodo);
     const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
@@ -619,14 +664,25 @@ const DB = (() => {
     const investimento = meses.reduce((s, o) => s + Number(o.investimento || 0), 0);
     const receita = meses.reduce((s, o) => s + totalReceitasMes(o), 0);
     const agora = new Date();
-    const mesAtual = getOfertaMes(agora.getFullYear(), agora.getMonth());
-    const lancamentosMes = mesAtual ? mesAtual.receitas.length : 0;
+    const lancamentosMes = data.ofertas
+      .filter(o => o.ano === agora.getFullYear() && o.mes === agora.getMonth())
+      .reduce((s, o) => s + o.receitas.length, 0);
     return {
       id: 'ofertas', nome: 'Grupo de Ofertas', rota: '#/ofertas',
       receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
-      ativas: meses.length, concluidas: 0,
-      extra: { lancamentosMes },
+      ativas: data.ofertas_grupos.length, concluidas: 0,
+      extra: { lancamentosMes, nichos: data.ofertas_grupos.length },
     };
+  }
+
+  // Resumo de UM nicho (usado na tela de Ofertas)
+  function resumoOfertasGrupo(grupoId, periodo) {
+    const desde = inicioPeriodo(periodo);
+    const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
+    const meses = data.ofertas.filter(o => o.grupo_id === grupoId && mesNoRange(o.ano, o.mes));
+    const investimento = meses.reduce((s, o) => s + Number(o.investimento || 0), 0);
+    const receita = meses.reduce((s, o) => s + totalReceitasMes(o), 0);
+    return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento) };
   }
 
   // Registro de operações — adicionar uma nova é só incluir seu resumo aqui.
@@ -747,7 +803,7 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 3,
+      versao: 4,
       exportado_em: now(),
       contas: data.contas,
       historico: data.historico,
@@ -755,6 +811,7 @@ const DB = (() => {
       farm_historico: data.farm_historico,
       ofertas: data.ofertas,
       ofertas_historico: data.ofertas_historico,
+      ofertas_grupos: data.ofertas_grupos,
     }, null, 2);
   }
 
@@ -774,12 +831,13 @@ const DB = (() => {
       throw new Error('Backup corrompido: farm sem id/username.');
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
     const ofertasHist = Array.isArray(obj.ofertas_historico) ? obj.ofertas_historico : [];
+    const ofertasGrupos = Array.isArray(obj.ofertas_grupos) ? obj.ofertas_grupos : [];
     if (ofertas.some(o => !o.id || !Array.isArray(o.receitas)))
       throw new Error('Backup corrompido: ofertas em formato inválido.');
     data = {
       contas: obj.contas, historico: obj.historico,
       farm, farm_historico: farmHist,
-      ofertas, ofertas_historico: ofertasHist,
+      ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
     };
     persist();
     return { contas: data.contas.length, eventos: data.historico.length, farm: data.farm.length, ofertas: data.ofertas.length };
@@ -803,9 +861,10 @@ const DB = (() => {
     indicadores, lucroMensal,
     criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
+    listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
-    excluirReceitaOferta, listarOfertasMeses, historicoDasOfertas, totalReceitasMes,
-    resumoCompraVenda, resumoFarm, resumoOfertas, resumosOperacoes, resumoGeral, resumoGeralPeriodo,
+    excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,
+    resumoCompraVenda, resumoFarm, resumoOfertas, resumoOfertasGrupo, resumosOperacoes, resumoGeral, resumoGeralPeriodo,
     evolucaoMensal, atividadeRecente,
     exportar, importar, totais,
   };
