@@ -62,7 +62,10 @@ function router() {
     else if (parts[1] === 'editar' && parts[2]) renderEditarFarm(parts[2]);
     else renderFarmDashboard();
   }
-  else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
+  else if (parts[0] === 'ofertas') {
+    if (parts[1] === 'nicho' && parts[2]) renderEditarNicho(parts[2]);
+    else renderOfertas(parts[1]);
+  }
   else renderDashboard();
 
   // Tab ativa (barra enxuta: Início + Backup)
@@ -1544,7 +1547,7 @@ function renderOfertas(param) {
       <span class="ms-label">${grupo ? esc(grupo.nome) : 'Sem nicho'}</span>
       <button class="ms-arrow" id="grupo-next" aria-label="Próximo nicho" ${umNicho ? 'disabled' : ''}>›</button>
     </div>
-    <button class="ver-mais" id="btn-editar-nicho">renomear ou excluir este nicho</button>
+    <button class="ver-mais" id="btn-editar-nicho">Editar nicho (dados, chip, conta…)</button>
 
     <div class="stats-grid">
       <div class="stat wide">
@@ -1555,6 +1558,15 @@ function renderOfertas(param) {
       <div class="stat"><div class="label">Receita</div><div class="value">${fmtBRL(res.receita)}</div></div>
       <div class="stat"><div class="label">Investimento</div><div class="value">${fmtBRL(res.investimento)}</div></div>
     </div>
+
+    ${grupo && (grupo.chip || grupo.conta_ml || grupo.senha || grupo.observacoes) ? `
+      <h2>Dados do nicho</h2>
+      <div class="card detail-rows">
+        ${grupo.chip ? `<div class="detail-row"><span class="k">Chip</span><span class="v">${esc(grupo.chip)}</span></div>` : ''}
+        ${grupo.conta_ml ? `<div class="detail-row"><span class="k">Conta ML</span><span class="v">${esc(grupo.conta_ml)}</span></div>` : ''}
+        ${grupo.senha ? `<div class="detail-row"><span class="k">Senha</span><span class="v"><span id="nicho-senha-v">••••••••</span> <button class="senha-toggle" id="nicho-senha-toggle">mostrar</button></span></div>` : ''}
+        ${grupo.observacoes ? `<div class="detail-row"><span class="k">Observações</span><span class="v" style="white-space:pre-wrap;">${esc(grupo.observacoes)}</span></div>` : ''}
+      </div>` : ''}
 
     <div class="month-switch">
       <a class="ms-arrow" href="#/ofertas/${prevP}" aria-label="Mês anterior">‹</a>
@@ -1619,40 +1631,21 @@ function renderOfertas(param) {
     });
   });
 
-  // Renomear / excluir nicho
+  // Editar nicho (nome + dados operacionais) — abre a tela de edição
   document.getElementById('btn-editar-nicho').addEventListener('click', () => {
-    if (!grupo) return;
-    openSheet(`
-      <h3>Nicho</h3>
-      <div class="form-group">
-        <label>Nome do nicho</label>
-        <input id="inp-nicho" type="text" value="${esc(grupo.nome)}">
-      </div>
-      <button class="btn btn-primary" id="save-nicho">Salvar nome</button>
-      ${grupos.length > 1 ? `<button class="btn btn-danger-ghost" id="del-nicho">Excluir este nicho</button>` : ''}
-      <button class="btn btn-secondary" id="cancel-nicho">Cancelar</button>
-    `, sheet => {
-      sheet.querySelector('#save-nicho').addEventListener('click', () => {
-        try {
-          DB.renomearGrupoOferta(grupo.id, sheet.querySelector('#inp-nicho').value);
-          closeSheet();
-          toast('Nicho renomeado ✓');
-          renderOfertas(paramAtual);
-        } catch (err) { toast(err.message); }
-      });
-      const del = sheet.querySelector('#del-nicho');
-      if (del) del.addEventListener('click', () => {
-        if (confirm(`Excluir o nicho "${grupo.nome}"? Todos os lançamentos dele serão apagados.`)) {
-          DB.excluirGrupoOferta(grupo.id);
-          ofertaGrupoId = null;
-          closeSheet();
-          toast('Nicho excluído');
-          renderOfertas(paramAtual);
-        }
-      });
-      sheet.querySelector('#cancel-nicho').addEventListener('click', closeSheet);
-    });
+    if (grupo) location.hash = '#/ofertas/nicho/' + grupo.id;
   });
+
+  // Mostrar/ocultar senha do nicho
+  const $ns = document.getElementById('nicho-senha-toggle');
+  if ($ns && grupo) {
+    let vis = false;
+    $ns.addEventListener('click', () => {
+      vis = !vis;
+      document.getElementById('nicho-senha-v').textContent = vis ? (grupo.senha || '') : '••••••••';
+      $ns.textContent = vis ? 'ocultar' : 'mostrar';
+    });
+  }
 
   // Definir/editar investimento do mês
   document.getElementById('btn-invest').addEventListener('click', () => {
@@ -1746,6 +1739,82 @@ function renderOfertas(param) {
       renderOfertas(paramAtual);
     }
   });
+}
+
+/* ============================================================
+   EDITAR NICHO (Grupo de Ofertas)  (#/ofertas/nicho/:id)
+   ============================================================ */
+function renderEditarNicho(grupoId) {
+  const grupos = DB.listarGruposOferta();
+  const g = grupos.find(x => x.id === grupoId);
+  if (!g) { location.hash = '#/ofertas'; return; }
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/ofertas">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Voltar
+    </a>
+    <div class="page-head"><h1>Editar nicho</h1></div>
+
+    <form id="form-nicho" novalidate>
+      <div class="form-group">
+        <label>Nome do nicho <span class="req">*</span></label>
+        <input name="nome" type="text" value="${esc(g.nome)}">
+      </div>
+      <div class="form-group">
+        <label>Número do chip</label>
+        <input name="chip" type="text" value="${esc(g.chip || '')}" placeholder="(00) 00000-0000">
+      </div>
+      <div class="form-group">
+        <label>Conta do Mercado Livre (login)</label>
+        <input name="conta_ml" type="text" value="${esc(g.conta_ml || '')}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Senha</label>
+        <input name="senha" type="text" value="${esc(g.senha || '')}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="observacoes" placeholder="Anotações sobre o nicho">${esc(g.observacoes || '')}</textarea>
+      </div>
+      <div class="form-error" id="form-error"></div>
+      <button class="btn btn-primary" type="submit">Salvar</button>
+      ${grupos.length > 1 ? '<button type="button" class="btn btn-danger-ghost" id="btn-excluir-nicho">Excluir este nicho</button>' : ''}
+    </form>
+  `;
+
+  document.getElementById('form-nicho').addEventListener('submit', e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      DB.atualizarGrupoOferta(grupoId, {
+        nome: f.get('nome'),
+        chip: f.get('chip'),
+        conta_ml: f.get('conta_ml'),
+        senha: f.get('senha'),
+        observacoes: f.get('observacoes'),
+      });
+      ofertaGrupoId = grupoId;
+      toast('Nicho salvo ✓');
+      location.hash = '#/ofertas';
+    } catch (err) {
+      const $err = document.getElementById('form-error');
+      $err.textContent = err.message;
+      $err.classList.add('show');
+    }
+  });
+
+  const $del = document.getElementById('btn-excluir-nicho');
+  if ($del) {
+    $del.addEventListener('click', () => {
+      if (confirm(`Excluir o nicho "${g.nome}"? Todos os lançamentos dele serão apagados.`)) {
+        DB.excluirGrupoOferta(grupoId);
+        ofertaGrupoId = null;
+        toast('Nicho excluído');
+        location.hash = '#/ofertas';
+      }
+    });
+  }
 }
 
 /* ============================================================

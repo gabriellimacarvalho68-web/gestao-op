@@ -520,6 +520,22 @@ const DB = (() => {
     return g;
   }
 
+  // Atualiza nome + dados operacionais do nicho (chip, conta ML, senha, obs)
+  function atualizarGrupoOferta(id, campos) {
+    const g = data.ofertas_grupos.find(x => x.id === id);
+    if (!g) throw new Error('Nicho não encontrado.');
+    if (campos.nome != null) {
+      const nome = String(campos.nome).trim();
+      if (!nome) throw new Error('Dê um nome ao nicho.');
+      g.nome = nome;
+    }
+    ['chip', 'conta_ml', 'senha', 'observacoes'].forEach(k => {
+      if (campos[k] != null) g[k] = String(campos[k]).trim();
+    });
+    persist();
+    return g;
+  }
+
   function excluirGrupoOferta(id) {
     const mesesIds = data.ofertas.filter(o => o.grupo_id === id).map(o => o.id);
     data.ofertas_grupos = data.ofertas_grupos.filter(g => g.id !== id);
@@ -861,7 +877,7 @@ const DB = (() => {
     indicadores, lucroMensal,
     criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
-    listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
+    listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, atualizarGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,
     resumoCompraVenda, resumoFarm, resumoOfertas, resumoOfertasGrupo, resumosOperacoes, resumoGeral, resumoGeralPeriodo,
