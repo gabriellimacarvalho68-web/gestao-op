@@ -417,10 +417,13 @@ const DB = (() => {
         if (v !== f[k]) { f[k] = v; mudou = true; }
       }
     });
-    // Custo próprio (aquisição). Aceita 'custo' como alias legado.
-    const proprio = campos.custo_proprio != null ? campos.custo_proprio : campos.custo;
-    if (proprio != null && proprio !== '' && !isNaN(Number(proprio)) && Number(proprio) >= 0) {
-      if (Number(proprio) !== Number(f.custo_proprio || 0)) { f.custo_proprio = Number(proprio); mudou = true; }
+    // Custo próprio (aquisição). Aceita 'custo' como alias legado. Vazio = 0.
+    if (campos.custo_proprio != null || campos.custo != null) {
+      const raw = campos.custo_proprio != null ? campos.custo_proprio : campos.custo;
+      const val = (raw === '' || raw == null) ? 0 : Number(raw);
+      if (!isNaN(val) && val >= 0 && val !== Number(f.custo_proprio || 0)) {
+        f.custo_proprio = val; mudou = true;
+      }
     }
     // Recursos vinculados (proxies etc.)
     if (Array.isArray(campos.recursos)) {
