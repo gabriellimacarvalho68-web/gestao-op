@@ -60,6 +60,7 @@ function router() {
     else if (parts[1] === 'conta' && parts[2]) renderFarmDetalhes(parts[2]);
     else if (parts[1] === 'venda' && parts[2]) renderFarmVenda(parts[2]);
     else if (parts[1] === 'editar' && parts[2]) renderEditarFarm(parts[2]);
+    else if (parts[1] === 'recursos') renderFarmRecursos();
     else renderFarmDashboard();
   }
   else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
@@ -925,6 +926,11 @@ function renderFarmDashboard() {
 
     ${searchHTML('farm-search', 'Pesquisar username ou plataforma')}
 
+    <a class="recurso-link" href="#/farm/recursos">
+      <span>🔌 Recursos compartilhados (proxies)</span>
+      <span class="op-chevron">›</span>
+    </a>
+
     <div class="stats-grid">
       <div class="stat wide">
         <div class="label">Lucro do farm</div>
@@ -1042,6 +1048,24 @@ function renderFarmLista() {
 /* ============================================================
    FARM — CADASTRO  (#/farm/nova)
    ============================================================ */
+// Checkboxes dos recursos (proxies) para vincular numa conta de farm
+function recursosCheckboxesHTML(selecionados) {
+  const recursos = DB.listarRecursosFarm();
+  if (!recursos.length) {
+    return `<p style="font-size:13px;color:var(--ink-2);">Nenhum recurso criado ainda. <a href="#/farm/recursos" style="color:var(--primary);font-weight:600;">Criar recurso (proxy)</a></p>`;
+  }
+  return `<div class="rec-checks">` + recursos.map(r => {
+    const n = DB.contasDoRecurso(r.id);
+    const checked = selecionados.includes(r.id);
+    return `
+      <label class="rec-check">
+        <input type="checkbox" name="recurso" value="${r.id}" ${checked ? 'checked' : ''}>
+        <span class="rec-check-nome">${esc(r.nome)}</span>
+        <span class="rec-check-info">${fmtBRL(r.custo_total)} · ${n} conta(s)</span>
+      </label>`;
+  }).join('') + `</div>`;
+}
+
 function renderFarmCadastro() {
   $view.innerHTML = `
     <a class="back-link" href="#/farm">
@@ -1068,8 +1092,14 @@ function renderFarmCadastro() {
         <input name="senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Custo investido (R$)</label>
-        <input name="custo" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+        <label>Custo de aquisição (R$)</label>
+        <input name="custo_proprio" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+        <div class="field-hint">Quanto você pagou pela conta em si.</div>
+      </div>
+      <div class="form-group">
+        <label>Recursos compartilhados (proxies)</label>
+        ${recursosCheckboxesHTML([])}
+        <div class="field-hint">O custo de cada recurso é dividido entre as contas que o usam.</div>
       </div>
       <div class="form-group">
         <label>Estágio</label>
@@ -1097,7 +1127,8 @@ function renderFarmCadastro() {
         plataforma: f.get('plataforma'),
         email: f.get('email'),
         senha: f.get('senha'),
-        custo: f.get('custo'),
+        custo_proprio: f.get('custo_proprio'),
+        recursos: f.getAll('recurso'),
         status: f.get('status'),
         observacoes: f.get('observacoes'),
       });
@@ -1154,7 +1185,14 @@ function renderFarmDetalhes(id) {
 
     <h2>Financeiro</h2>
     <div class="card detail-rows">
-      <div class="detail-row"><span class="k">Custo investido</span><span class="v">${fmtBRL(c.custo)}</span></div>
+      <div class="detail-row"><span class="k">Custo de aquisição</span><span class="v">${fmtBRL(c.custo_proprio || 0)}</span></div>
+      ${(c.recursos || []).map(rid => {
+        const r = DB.listarRecursosFarm().find(x => x.id === rid);
+        if (!r) return '';
+        const n = DB.contasDoRecurso(rid);
+        return `<div class="detail-row"><span class="k">${esc(r.nome)} <span class="k-sub">(÷${n})</span></span><span class="v">${fmtBRL(DB.custoRecursoPorConta(rid))}</span></div>`;
+      }).join('')}
+      <div class="detail-row"><span class="k">Custo total</span><span class="v" style="font-weight:700;">${fmtBRL(c.custo)}</span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
       <div class="detail-row"><span class="k">Data da venda</span><span class="v">${fmtData(c.data_venda)}</span></div>
@@ -1440,8 +1478,14 @@ function renderEditarFarm(id) {
         <input name="senha" type="text" value="${esc(c.senha)}" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Custo investido (R$)</label>
-        <input name="custo" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo}">
+        <label>Custo de aquisição (R$)</label>
+        <input name="custo_proprio" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo_proprio != null ? c.custo_proprio : c.custo}">
+        <div class="field-hint">Quanto você pagou pela conta em si.</div>
+      </div>
+      <div class="form-group">
+        <label>Recursos compartilhados (proxies)</label>
+        ${recursosCheckboxesHTML(c.recursos || [])}
+        <div class="field-hint">O custo de cada recurso é dividido entre as contas que o usam.</div>
       </div>
       ${vendida ? `
       <div class="form-group">
@@ -1466,7 +1510,8 @@ function renderEditarFarm(id) {
         plataforma: f.get('plataforma'),
         email: f.get('email'),
         senha: f.get('senha'),
-        custo: f.get('custo'),
+        custo_proprio: f.get('custo_proprio'),
+        recursos: f.getAll('recurso'),
         preco_venda: f.get('preco_venda'),
         observacoes: f.get('observacoes'),
       });
@@ -1745,6 +1790,103 @@ function renderOfertas(param) {
       toast('Receita excluída');
       renderOfertas(paramAtual);
     }
+  });
+}
+
+/* ============================================================
+   RECURSOS DO FARM (proxies compartilhadas)  (#/farm/recursos)
+   ============================================================ */
+function recursoRowHTML(r) {
+  const n = DB.contasDoRecurso(r.id);
+  const porConta = DB.custoRecursoPorConta(r.id);
+  return `
+    <div class="card recurso-card">
+      <div class="rc-info">
+        <div class="rc-nome">${esc(r.nome)}</div>
+        <div class="rc-meta">${fmtBRL(r.custo_total)} total · ${n} conta(s)</div>
+      </div>
+      <div class="rc-fin">
+        <div class="rc-val">${n > 0 ? fmtBRL(porConta) : '—'}</div>
+        <div class="rc-lbl">por conta</div>
+      </div>
+      <button class="senha-toggle" data-edit="${r.id}">editar</button>
+    </div>`;
+}
+
+function sheetRecurso(recurso) {
+  const editar = !!recurso;
+  openSheet(`
+    <h3>${editar ? 'Editar recurso' : 'Novo recurso'}</h3>
+    <div class="form-group">
+      <label>Nome (ex.: Proxy Vivo #1)</label>
+      <input id="inp-rec-nome" type="text" value="${editar ? esc(recurso.nome) : ''}" placeholder="Proxy, chip, ferramenta…">
+    </div>
+    <div class="form-group">
+      <label>Custo total (R$)</label>
+      <input id="inp-rec-custo" type="number" inputmode="decimal" step="0.01" min="0" value="${editar ? recurso.custo_total : ''}" placeholder="0,00">
+    </div>
+    <div class="form-error" id="rec-err"></div>
+    <button class="btn btn-primary" id="save-rec">${editar ? 'Salvar' : 'Criar recurso'}</button>
+    ${editar ? '<button class="btn btn-danger-ghost" id="del-rec">Excluir recurso</button>' : ''}
+    <button class="btn btn-secondary" id="cancel-rec">Cancelar</button>
+  `, sheet => {
+    const nome = sheet.querySelector('#inp-rec-nome');
+    setTimeout(() => nome.focus(), 50);
+    sheet.querySelector('#save-rec').addEventListener('click', () => {
+      try {
+        const custo = sheet.querySelector('#inp-rec-custo').value;
+        if (editar) DB.atualizarRecursoFarm(recurso.id, { nome: nome.value, custo_total: custo });
+        else DB.criarRecursoFarm(nome.value, custo);
+        closeSheet();
+        toast(editar ? 'Recurso salvo ✓' : 'Recurso criado ✓');
+        renderFarmRecursos();
+      } catch (err) {
+        const e = sheet.querySelector('#rec-err');
+        e.textContent = err.message; e.classList.add('show');
+      }
+    });
+    const del = sheet.querySelector('#del-rec');
+    if (del) del.addEventListener('click', () => {
+      if (confirm(`Excluir o recurso "${recurso.nome}"? Ele será desvinculado de todas as contas e os custos recalculados.`)) {
+        DB.excluirRecursoFarm(recurso.id);
+        closeSheet();
+        toast('Recurso excluído');
+        renderFarmRecursos();
+      }
+    });
+    sheet.querySelector('#cancel-rec').addEventListener('click', closeSheet);
+  });
+}
+
+function renderFarmRecursos() {
+  const recursos = DB.listarRecursosFarm();
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Farm
+    </a>
+    <div class="page-head">
+      <div class="page-head-row">
+        <div><h1>Recursos</h1><div class="subtitle">Custos compartilhados (proxies etc.)</div></div>
+        <button class="btn-small" id="btn-novo-recurso">+ Recurso</button>
+      </div>
+    </div>
+
+    <div class="conta-list" id="recursos-lista">
+      ${recursos.length
+        ? recursos.map(recursoRowHTML).join('')
+        : `<div class="card empty"><div class="icon">🔌</div><p>Nenhum recurso ainda.<br>Crie uma proxy e vincule às contas no cadastro ou na edição.</p></div>`}
+    </div>
+    <p class="recurso-hint">O custo de cada recurso é dividido igualmente entre as contas que o usam. Adicione mais contas e a fatia de cada uma cai.</p>
+  `;
+
+  document.getElementById('btn-novo-recurso').addEventListener('click', () => sheetRecurso(null));
+  document.getElementById('recursos-lista').addEventListener('click', e => {
+    const btn = e.target.closest('[data-edit]');
+    if (!btn) return;
+    const r = DB.listarRecursosFarm().find(x => x.id === btn.dataset.edit);
+    if (r) sheetRecurso(r);
   });
 }
 

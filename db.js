@@ -35,13 +35,19 @@ const DB = (() => {
         obj.historico = obj.historico || [];
         obj.farm = obj.farm || [];
         obj.farm_historico = obj.farm_historico || [];
+        obj.farm_recursos = obj.farm_recursos || [];
         obj.ofertas = obj.ofertas || [];
         obj.ofertas_historico = obj.ofertas_historico || [];
         obj.ofertas_grupos = obj.ofertas_grupos || [];
+        // Migração: custo passa a ser custo_proprio + fatias de recursos
+        obj.farm.forEach(f => {
+          if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
+          if (!Array.isArray(f.recursos)) f.recursos = [];
+        });
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [] };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [] };
   }
 
   let data = load();
@@ -94,6 +100,74 @@ const DB = (() => {
   function calcLucroFarm(f) {
     if (f.preco_venda == null) return 0;
     return Number(f.preco_venda) - Number(f.custo || 0);
+  }
+
+  // ---- Recursos compartilhados do farm (proxies etc.) ----
+  // Quantas contas usam um recurso (divisor do custo)
+  function contasDoRecurso(recursoId) {
+    return data.farm.filter(f => (f.recursos || []).includes(recursoId)).length;
+  }
+
+  // Fatia do custo de um recurso por conta que o usa
+  function custoRecursoPorConta(recursoId) {
+    const r = data.farm_recursos.find(x => x.id === recursoId);
+    if (!r) return 0;
+    const n = contasDoRecurso(recursoId);
+    return n > 0 ? Number(r.custo_total || 0) / n : 0;
+  }
+
+  // Custo total de uma conta = custo próprio + soma das fatias dos recursos
+  function custoTotalFarm(f) {
+    let total = Number(f.custo_proprio || 0);
+    (f.recursos || []).forEach(rid => { total += custoRecursoPorConta(rid); });
+    return total;
+  }
+
+  // Recalcula o custo (e o lucro das vendidas) de TODAS as contas de farm.
+  // Chamado sempre que muda um recurso, um vínculo ou o custo próprio.
+  function recalcularCustosFarm() {
+    data.farm.forEach(f => {
+      f.custo = custoTotalFarm(f);
+      f.lucro = calcLucroFarm(f);
+    });
+  }
+
+  function listarRecursosFarm() {
+    return [...data.farm_recursos].sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  }
+
+  function criarRecursoFarm(nome, custoTotal) {
+    nome = String(nome || '').trim();
+    if (!nome) throw new Error('Dê um nome ao recurso.');
+    if (custoTotal == null || custoTotal === '' || isNaN(Number(custoTotal)) || Number(custoTotal) < 0)
+      throw new Error('Informe um custo válido para o recurso.');
+    const r = { id: uuid(), nome, custo_total: Number(custoTotal), criado_em: now() };
+    data.farm_recursos.push(r);
+    persist();
+    return r;
+  }
+
+  function atualizarRecursoFarm(id, { nome, custo_total }) {
+    const r = data.farm_recursos.find(x => x.id === id);
+    if (!r) throw new Error('Recurso não encontrado.');
+    if (nome != null) {
+      const n = String(nome).trim();
+      if (!n) throw new Error('Dê um nome ao recurso.');
+      r.nome = n;
+    }
+    if (custo_total != null && custo_total !== '' && !isNaN(Number(custo_total)) && Number(custo_total) >= 0) {
+      r.custo_total = Number(custo_total);
+    }
+    recalcularCustosFarm(); // custo por conta muda
+    persist();
+    return r;
+  }
+
+  function excluirRecursoFarm(id) {
+    data.farm_recursos = data.farm_recursos.filter(r => r.id !== id);
+    data.farm.forEach(f => { f.recursos = (f.recursos || []).filter(rid => rid !== id); });
+    recalcularCustosFarm();
+    persist();
   }
 
   // Username único dentro do farm (independente das contas de compra/venda)
@@ -289,11 +363,13 @@ const DB = (() => {
     return data.farm.find(f => f.id === id) || null;
   }
 
-  function criarFarm({ username, plataforma, email, senha, custo, status, observacoes, data_inicio }) {
+  function criarFarm({ username, plataforma, email, senha, custo_proprio, custo, status, observacoes, data_inicio, recursos }) {
     username = String(username || '').trim();
     plataforma = String(plataforma || '').trim();
     if (!username) throw new Error('Username é obrigatório.');
-    if (custo !== '' && custo != null && isNaN(Number(custo)))
+    // custo_proprio (aquisição da conta); aceita 'custo' como alias legado
+    const proprio = custo_proprio != null ? custo_proprio : custo;
+    if (proprio !== '' && proprio != null && isNaN(Number(proprio)))
       throw new Error('Custo inválido.');
     if (farmUsernameExiste(username)) throw new Error('Já existe uma conta em farm com esse username.');
 
@@ -303,7 +379,9 @@ const DB = (() => {
       plataforma,
       email: String(email || '').trim(),
       senha: String(senha || ''),
-      custo: custo == null || custo === '' ? 0 : Number(custo),
+      custo_proprio: proprio == null || proprio === '' ? 0 : Number(proprio),
+      recursos: Array.isArray(recursos) ? recursos.slice() : [],
+      custo: 0, // calculado abaixo
       preco_venda: null,
       lucro: 0,
       status: FARM_STATUS.includes(status) ? status : 'Crescendo',
@@ -314,9 +392,10 @@ const DB = (() => {
       atualizado_em: now(),
     };
     data.farm.push(f);
+    recalcularCustosFarm(); // define f.custo e redivide recursos entre as contas
     addFarmHistorico(f.id, 'Conta criada', `Conta @${f.username} adicionada ao farm${f.plataforma ? ' — ' + f.plataforma : ''}.`);
     if (f.custo > 0) {
-      addFarmHistorico(f.id, 'Custo registrado', `Investimento inicial de ${fmtBRL(f.custo)}.`);
+      addFarmHistorico(f.id, 'Custo registrado', `Custo inicial de ${fmtBRL(f.custo)}.`);
     }
     persist();
     return f;
@@ -338,13 +417,15 @@ const DB = (() => {
         if (v !== f[k]) { f[k] = v; mudou = true; }
       }
     });
-    if (campos.custo != null && campos.custo !== '' && !isNaN(Number(campos.custo)) && Number(campos.custo) >= 0) {
-      const anterior = f.custo;
-      if (Number(campos.custo) !== anterior) {
-        f.custo = Number(campos.custo);
-        f.lucro = calcLucroFarm(f);
-        addFarmHistorico(id, 'Custo atualizado', `De ${fmtBRL(anterior)} para ${fmtBRL(f.custo)}.`);
-      }
+    // Custo próprio (aquisição). Aceita 'custo' como alias legado.
+    const proprio = campos.custo_proprio != null ? campos.custo_proprio : campos.custo;
+    if (proprio != null && proprio !== '' && !isNaN(Number(proprio)) && Number(proprio) >= 0) {
+      if (Number(proprio) !== Number(f.custo_proprio || 0)) { f.custo_proprio = Number(proprio); mudou = true; }
+    }
+    // Recursos vinculados (proxies etc.)
+    if (Array.isArray(campos.recursos)) {
+      const novo = campos.recursos.slice();
+      if (JSON.stringify(novo) !== JSON.stringify(f.recursos || [])) { f.recursos = novo; mudou = true; }
     }
     // Valor da venda só é editável quando a conta já foi vendida
     if (f.preco_venda != null && campos.preco_venda != null && campos.preco_venda !== '' &&
@@ -352,10 +433,10 @@ const DB = (() => {
       const anterior = f.preco_venda;
       if (Number(campos.preco_venda) !== anterior) {
         f.preco_venda = Number(campos.preco_venda);
-        f.lucro = calcLucroFarm(f);
         addFarmHistorico(id, 'Venda atualizada', `De ${fmtBRL(anterior)} para ${fmtBRL(f.preco_venda)}.`);
       }
     }
+    recalcularCustosFarm(); // recalcula custo/lucro de todas (o split pode ter mudado)
     if (mudou) addFarmHistorico(id, 'Dados atualizados', 'Informações da conta editadas.');
     f.atualizado_em = now();
     persist();
@@ -423,6 +504,7 @@ const DB = (() => {
   function excluirFarm(id) {
     data.farm = data.farm.filter(f => f.id !== id);
     data.farm_historico = data.farm_historico.filter(h => h.farm_id !== id);
+    recalcularCustosFarm(); // remover a conta muda a divisão dos recursos dela
     persist();
   }
 
@@ -803,12 +885,13 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 4,
+      versao: 5,
       exportado_em: now(),
       contas: data.contas,
       historico: data.historico,
       farm: data.farm,
       farm_historico: data.farm_historico,
+      farm_recursos: data.farm_recursos,
       ofertas: data.ofertas,
       ofertas_historico: data.ofertas_historico,
       ofertas_grupos: data.ofertas_grupos,
@@ -827,6 +910,7 @@ const DB = (() => {
     // Farm e Ofertas: opcionais (retrocompatível com backups das versões 1 e 2)
     const farm = Array.isArray(obj.farm) ? obj.farm : [];
     const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
+    const farmRecursos = Array.isArray(obj.farm_recursos) ? obj.farm_recursos : [];
     if (farm.some(f => !f.id || !f.username))
       throw new Error('Backup corrompido: farm sem id/username.');
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
@@ -834,11 +918,17 @@ const DB = (() => {
     const ofertasGrupos = Array.isArray(obj.ofertas_grupos) ? obj.ofertas_grupos : [];
     if (ofertas.some(o => !o.id || !Array.isArray(o.receitas)))
       throw new Error('Backup corrompido: ofertas em formato inválido.');
+    // Migração dos itens de farm (custo_proprio/recursos)
+    farm.forEach(f => {
+      if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
+      if (!Array.isArray(f.recursos)) f.recursos = [];
+    });
     data = {
       contas: obj.contas, historico: obj.historico,
-      farm, farm_historico: farmHist,
+      farm, farm_historico: farmHist, farm_recursos: farmRecursos,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
     };
+    recalcularCustosFarm();
     persist();
     return { contas: data.contas.length, eventos: data.historico.length, farm: data.farm.length, ofertas: data.ofertas.length };
   }
@@ -861,6 +951,8 @@ const DB = (() => {
     indicadores, lucroMensal,
     criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
+    listarRecursosFarm, criarRecursoFarm, atualizarRecursoFarm, excluirRecursoFarm,
+    contasDoRecurso, custoRecursoPorConta,
     listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,
