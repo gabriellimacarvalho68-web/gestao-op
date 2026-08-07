@@ -172,6 +172,23 @@ const PERIODOS = ['mes', '6meses', 'tudo'];
 const PERIODO_LABEL = { mes: 'Este mês', '6meses': 'Últimos 6 meses', tudo: 'Tudo (acumulado)' };
 const dashState = { periodo: '6meses', atividadeAberta: false };
 
+// Barra de meta anual (lucro do ano / meta) — topo do dashboard
+function metaBarHTML() {
+  const meta = DB.getMetaAnual();
+  const lucroAno = DB.resumoGeral('ano').lucro;
+  const pct = meta > 0 ? Math.max(0, Math.min(1, lucroAno / meta)) * 100 : 0;
+  const metaTxt = meta > 0 ? compactBRL(meta) : 'definir';
+  return `
+    <button class="meta-bar ${lucroAno >= 0 ? '' : 'neg'}" id="meta-bar" style="--pct:${pct}%" aria-label="Editar meta do ano">
+      <span class="meta-icon">🎯</span>
+      <span class="meta-track">
+        <span class="meta-fill"></span>
+        <span class="meta-text">${compactBRL(lucroAno)} / ${metaTxt}</span>
+      </span>
+      <span class="meta-edit">✏️</span>
+    </button>`;
+}
+
 function renderDashboard() {
   const g = DB.resumoGeralPeriodo(dashState.periodo);
   const ops = DB.resumosOperacoes('mes'); // cards de operação = mês atual
@@ -180,6 +197,7 @@ function renderDashboard() {
   const mostradas = aberta ? atividade : atividade.slice(0, 1);
 
   $view.innerHTML = `
+    ${metaBarHTML()}
     <div class="page-head">
       <h1>Centro de Operações</h1>
       <div class="subtitle">${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
@@ -238,6 +256,31 @@ function renderDashboard() {
 
   const $ta = document.getElementById('toggle-atividade');
   if ($ta) $ta.addEventListener('click', () => { dashState.atividadeAberta = !dashState.atividadeAberta; renderDashboard(); });
+
+  // Editar meta do ano
+  document.getElementById('meta-bar').addEventListener('click', () => {
+    openSheet(`
+      <h3>Meta de lucro do ano</h3>
+      <div class="form-group">
+        <label>Meta anual (R$)</label>
+        <input id="inp-meta" type="number" inputmode="decimal" step="0.01" min="0" value="${DB.getMetaAnual() || ''}" placeholder="0,00">
+      </div>
+      <button class="btn btn-primary" id="save-meta">Salvar meta</button>
+      <button class="btn btn-secondary" id="cancel-meta">Cancelar</button>
+    `, sheet => {
+      const inp = sheet.querySelector('#inp-meta');
+      setTimeout(() => inp.focus(), 50);
+      sheet.querySelector('#save-meta').addEventListener('click', () => {
+        try {
+          DB.setMetaAnual(inp.value);
+          closeSheet();
+          toast('Meta salva ✓');
+          renderDashboard();
+        } catch (err) { toast(err.message); }
+      });
+      sheet.querySelector('#cancel-meta').addEventListener('click', closeSheet);
+    });
+  });
 
   renderChartOperacoes(
     document.getElementById('chart-wrap'),

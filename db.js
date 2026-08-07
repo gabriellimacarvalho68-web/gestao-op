@@ -39,6 +39,7 @@ const DB = (() => {
         obj.ofertas = obj.ofertas || [];
         obj.ofertas_historico = obj.ofertas_historico || [];
         obj.ofertas_grupos = obj.ofertas_grupos || [];
+        obj.meta_anual = obj.meta_anual != null ? obj.meta_anual : 10000;
         // Migração: custo passa a ser custo_proprio + fatias de recursos
         obj.farm.forEach(f => {
           if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
@@ -47,7 +48,7 @@ const DB = (() => {
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [] };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], meta_anual: 10000 };
   }
 
   let data = load();
@@ -702,7 +703,21 @@ const DB = (() => {
     const agora = new Date();
     if (periodo === 'mes') return new Date(agora.getFullYear(), agora.getMonth(), 1);
     if (periodo === '6meses') return new Date(agora.getFullYear(), agora.getMonth() - 5, 1);
+    if (periodo === 'ano') return new Date(agora.getFullYear(), 0, 1);
     return null; // 'tudo'
+  }
+
+  // ---- Meta anual (barra de progresso) ----
+  function getMetaAnual() {
+    return Number(data.meta_anual || 0);
+  }
+
+  function setMetaAnual(valor) {
+    const v = valor == null || valor === '' ? 0 : Number(valor);
+    if (isNaN(v) || v < 0) throw new Error('Informe uma meta válida.');
+    data.meta_anual = v;
+    persist();
+    return v;
   }
 
   function resumoCompraVenda(periodo) {
@@ -888,8 +903,9 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 5,
+      versao: 6,
       exportado_em: now(),
+      meta_anual: data.meta_anual,
       contas: data.contas,
       historico: data.historico,
       farm: data.farm,
@@ -930,6 +946,7 @@ const DB = (() => {
       contas: obj.contas, historico: obj.historico,
       farm, farm_historico: farmHist, farm_recursos: farmRecursos,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
+      meta_anual: obj.meta_anual != null ? obj.meta_anual : 10000,
     };
     recalcularCustosFarm();
     persist();
@@ -961,6 +978,7 @@ const DB = (() => {
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,
     resumoCompraVenda, resumoFarm, resumoOfertas, resumoOfertasGrupo, resumosOperacoes, resumoGeral, resumoGeralPeriodo,
     evolucaoMensal, atividadeRecente,
+    getMetaAnual, setMetaAnual,
     exportar, importar, totais,
   };
 })();

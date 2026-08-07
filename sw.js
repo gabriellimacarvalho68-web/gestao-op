@@ -1,7 +1,7 @@
 /* Service worker — cache do app shell para funcionar offline.
    Estratégia: rede primeiro (ignorando o cache HTTP, para atualizações
    chegarem na hora); se estiver offline, usa a cópia guardada. */
-const CACHE = 'gestao-op-v20';
+const CACHE = 'gestao-op-v21';
 const ASSETS = [
   './',
   './index.html',

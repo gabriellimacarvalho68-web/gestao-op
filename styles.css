@@ -550,3 +550,32 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 
 .field-hint { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
 .detail-row .k-sub { color: var(--ink-3); font-size: 12px; }
+
+/* Barra de meta anual */
+.meta-bar {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; margin-bottom: 16px;
+  background: var(--success); color: #fff;
+  border: none; border-radius: 100px;
+  padding: 6px 8px 6px 12px;
+  cursor: pointer; font-family: inherit;
+  box-shadow: 0 4px 14px rgba(52,199,89,0.3);
+}
+.meta-bar.neg { background: var(--danger); box-shadow: 0 4px 14px rgba(255,59,48,0.3); }
+.meta-icon { font-size: 15px; flex: none; }
+.meta-track {
+  position: relative; flex: 1; min-width: 0; height: 24px;
+  background: rgba(255,255,255,0.22); border-radius: 100px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.meta-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: var(--pct, 0%);
+  background: rgba(255,255,255,0.42); border-radius: 100px;
+  transition: width 0.4s ease;
+}
+.meta-text { position: relative; z-index: 1; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.meta-edit {
+  flex: none; width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(255,255,255,0.22);
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+}
