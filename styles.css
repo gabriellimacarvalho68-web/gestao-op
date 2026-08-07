@@ -523,6 +523,8 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
   box-shadow: var(--shadow-card); text-decoration: none; color: var(--ink);
   font-size: 14px; font-weight: 600; margin-bottom: 14px;
 }
+.rl-left { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.rl-icon { width: 18px; height: 18px; fill: var(--primary); flex: none; }
 .recurso-card { display: flex; align-items: center; gap: 12px; }
 .recurso-card .rc-info { flex: 1; min-width: 0; }
 .recurso-card .rc-nome { font-weight: 600; font-size: 15px; }
@@ -562,7 +564,8 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
   box-shadow: 0 4px 14px rgba(52,199,89,0.3);
 }
 .meta-bar.neg { background: var(--danger); box-shadow: 0 4px 14px rgba(255,59,48,0.3); }
-.meta-icon { font-size: 15px; flex: none; }
+.meta-icon { flex: none; display: flex; align-items: center; }
+.meta-icon svg { width: 16px; height: 16px; }
 .meta-track {
   position: relative; flex: 1; min-width: 0; height: 24px;
   background: rgba(255,255,255,0.22); border-radius: 100px; overflow: hidden;
@@ -577,5 +580,6 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 .meta-edit {
   flex: none; width: 28px; height: 28px; border-radius: 50%;
   background: rgba(255,255,255,0.22);
-  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
 }
+.meta-edit svg { width: 14px; height: 14px; }

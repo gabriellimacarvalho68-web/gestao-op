@@ -180,12 +180,12 @@ function metaBarHTML() {
   const metaTxt = meta > 0 ? compactBRL(meta) : 'definir';
   return `
     <button class="meta-bar ${lucroAno >= 0 ? '' : 'neg'}" id="meta-bar" style="--pct:${pct}%" aria-label="Editar meta do ano">
-      <span class="meta-icon">🎯</span>
+      <span class="meta-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/></svg></span>
       <span class="meta-track">
         <span class="meta-fill"></span>
         <span class="meta-text">${compactBRL(lucroAno)} / ${metaTxt}</span>
       </span>
-      <span class="meta-edit">✏️</span>
+      <span class="meta-edit"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></span>
     </button>`;
 }
 
@@ -540,7 +540,7 @@ function renderLista() {
       contas.length + (contas.length === 1 ? ' conta' : ' contas');
     document.getElementById('lista').innerHTML = contas.length
       ? contas.map(contaItemHTML).join('')
-      : `<div class="card empty"><div class="icon">🔍</div><p>Nenhuma conta encontrada.</p></div>`;
+      : `<div class="card empty"><p>Nenhuma conta encontrada.</p></div>`;
   }
 
   $busca.addEventListener('input', () => { listaState.busca = $busca.value; refresh(); });
@@ -635,7 +635,7 @@ function renderCadastro() {
 function renderDetalhes(id) {
   const c = DB.getConta(id);
   if (!c) {
-    $view.innerHTML = `<div class="card empty"><div class="icon">❓</div><p>Conta não encontrada.</p></div>`;
+    $view.innerHTML = `<div class="card empty"><p>Conta não encontrada.</p></div>`;
     return;
   }
   const hist = DB.historicoDaConta(id);
@@ -970,7 +970,7 @@ function renderFarmDashboard() {
     ${searchHTML('farm-search', 'Pesquisar username ou plataforma')}
 
     <a class="recurso-link" href="#/farm/recursos">
-      <span>🔌 Recursos compartilhados (proxies)</span>
+      <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>Recursos compartilhados (proxies)</span>
       <span class="op-chevron">›</span>
     </a>
 
@@ -1015,7 +1015,7 @@ function renderFarmDashboard() {
     <div class="conta-list">
       ${ultimas.length
         ? ultimas.map(farmItemHTML).join('')
-        : `<div class="card empty"><div class="icon">🌱</div><p>Nenhuma conta em farm ainda.<br>Toque em <strong>+ Nova conta</strong> para começar.</p></div>`}
+        : `<div class="card empty"><p>Nenhuma conta em farm ainda.<br>Toque em <strong>+ Nova conta</strong> para começar.</p></div>`}
     </div>
   `;
 
@@ -1071,7 +1071,7 @@ function renderFarmLista() {
       lista.length + (lista.length === 1 ? ' conta' : ' contas');
     document.getElementById('farm-lista').innerHTML = lista.length
       ? lista.map(farmItemHTML).join('')
-      : `<div class="card empty"><div class="icon">🔍</div><p>Nenhuma conta encontrada.</p></div>`;
+      : `<div class="card empty"><p>Nenhuma conta encontrada.</p></div>`;
   }
 
   $busca.addEventListener('input', () => { farmListaState.busca = $busca.value; refresh(); });
@@ -1191,7 +1191,7 @@ function renderFarmCadastro() {
 function renderFarmDetalhes(id) {
   const c = DB.getFarm(id);
   if (!c) {
-    $view.innerHTML = `<div class="card empty"><div class="icon">❓</div><p>Conta não encontrada.</p></div>`;
+    $view.innerHTML = `<div class="card empty"><p>Conta não encontrada.</p></div>`;
     return;
   }
   const hist = DB.historicoDoFarm(id);
@@ -1919,7 +1919,7 @@ function renderFarmRecursos() {
     <div class="conta-list" id="recursos-lista">
       ${recursos.length
         ? recursos.map(recursoRowHTML).join('')
-        : `<div class="card empty"><div class="icon">🔌</div><p>Nenhum recurso ainda.<br>Crie uma proxy e vincule às contas no cadastro ou na edição.</p></div>`}
+        : `<div class="card empty"><p>Nenhum recurso ainda.<br>Crie uma proxy e vincule às contas no cadastro ou na edição.</p></div>`}
     </div>
     <p class="recurso-hint">O custo de cada recurso é dividido igualmente entre as contas que o usam. Adicione mais contas e a fatia de cada uma cai.</p>
   `;
