@@ -24,6 +24,36 @@ function toast(msg) {
   $toast._t = setTimeout(() => $toast.classList.remove('show'), 2200);
 }
 
+// Copia texto para a área de transferência (com fallback p/ navegadores antigos)
+function copiarTexto(texto) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(texto);
+  }
+  return new Promise((resolve, reject) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = texto;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      resolve();
+    } catch (e) { reject(e); }
+  });
+}
+
+// Monta o texto dos dados de uma conta (usuário, email, senha, observações)
+function textoDadosConta(c) {
+  const linhas = [`Usuário: ${c.username.replace(/^@/, '')}`];
+  if (c.email) linhas.push(`Email: ${c.email}`);
+  if (c.senha) linhas.push(`Senha: ${c.senha}`);
+  if (c.observacoes) linhas.push(`Observações: ${c.observacoes}`);
+  return linhas.join('\n');
+}
+
 function lucroClass(conta) {
   if (conta.preco_venda == null) return '';
   return conta.lucro >= 0 ? 'pos' : 'neg';
@@ -656,7 +686,10 @@ function renderDetalhes(id) {
       </div>
     </div>
 
-    <h2>Dados da conta</h2>
+    <div class="section-row">
+      <h2>Dados da conta</h2>
+      <button class="sec-link" id="btn-copiar">Copiar dados</button>
+    </div>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
       <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}</span></div>
@@ -717,6 +750,14 @@ function renderDetalhes(id) {
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
     });
   }
+
+  // Copiar dados da conta
+  const $cp = document.getElementById('btn-copiar');
+  if ($cp) $cp.addEventListener('click', () => {
+    copiarTexto(textoDadosConta(c))
+      .then(() => toast('Dados copiados ✓'))
+      .catch(() => toast('Não foi possível copiar'));
+  });
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estoque
   const $cancelar = document.getElementById('btn-cancelar-venda');
@@ -1212,7 +1253,10 @@ function renderFarmDetalhes(id) {
       </div>
     </div>
 
-    <h2>Dados da conta</h2>
+    <div class="section-row">
+      <h2>Dados da conta</h2>
+      <button class="sec-link" id="btn-copiar">Copiar dados</button>
+    </div>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
       <div class="detail-row"><span class="k">Plataforma</span><span class="v">${esc(c.plataforma) || '—'}</span></div>
@@ -1276,6 +1320,14 @@ function renderFarmDetalhes(id) {
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
     });
   }
+
+  // Copiar dados da conta
+  const $cp = document.getElementById('btn-copiar');
+  if ($cp) $cp.addEventListener('click', () => {
+    copiarTexto(textoDadosConta(c))
+      .then(() => toast('Dados copiados ✓'))
+      .catch(() => toast('Não foi possível copiar'));
+  });
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estágio padrão
   const $cancelar = document.getElementById('btn-cancelar-venda');
