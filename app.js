@@ -45,13 +45,50 @@ function copiarTexto(texto) {
   });
 }
 
-// Monta o texto dos dados de uma conta (usuário, email, senha, observações)
-function textoDadosConta(c) {
+// Monta o texto dos dados de uma conta (usuário, email, senha, e opcionalmente observações)
+function textoDadosConta(c, incluirObs = true) {
   const linhas = [`Usuário: ${c.username.replace(/^@/, '')}`];
   if (c.email) linhas.push(`Email: ${c.email}`);
   if (c.senha) linhas.push(`Senha: ${c.senha}`);
-  if (c.observacoes) linhas.push(`Observações: ${c.observacoes}`);
+  if (incluirObs && c.observacoes) linhas.push(`Observações: ${c.observacoes}`);
   return linhas.join('\n');
+}
+
+// Menu de envio dos dados: compartilhar (folha do iOS) ou copiar, com/sem observações
+function abrirEnvioDados(c) {
+  const temObs = !!c.observacoes;
+  const opcoes = temObs ? [
+    { label: 'Compartilhar sem observações', acao: 'share', obs: false },
+    { label: 'Compartilhar com observações', acao: 'share', obs: true },
+    { label: 'Copiar sem observações', acao: 'copy', obs: false },
+    { label: 'Copiar com observações', acao: 'copy', obs: true },
+  ] : [
+    { label: 'Compartilhar', acao: 'share', obs: false },
+    { label: 'Copiar', acao: 'copy', obs: false },
+  ];
+  openSheet(`
+    <h3>Enviar dados da conta</h3>
+    <div class="opts">
+      ${opcoes.map((o, i) => `<button class="opt" data-i="${i}"><span>${o.label}</span></button>`).join('')}
+    </div>
+    <button class="btn btn-secondary" id="env-cancel">Cancelar</button>
+  `, sheet => {
+    sheet.querySelectorAll('.opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const o = opcoes[Number(btn.dataset.i)];
+        const texto = 'Segue os dados da conta:\n\n' + textoDadosConta(c, o.obs);
+        closeSheet();
+        if (o.acao === 'share' && navigator.share) {
+          navigator.share({ text: texto }).catch(err => {
+            if (err && err.name !== 'AbortError') copiarTexto(texto).then(() => toast('Dados copiados ✓'));
+          });
+        } else {
+          copiarTexto(texto).then(() => toast('Dados copiados ✓')).catch(() => toast('Não foi possível copiar'));
+        }
+      });
+    });
+    sheet.querySelector('#env-cancel').addEventListener('click', closeSheet);
+  });
 }
 
 function lucroClass(conta) {
@@ -688,7 +725,7 @@ function renderDetalhes(id) {
 
     <div class="section-row">
       <h2>Dados da conta</h2>
-      <button class="sec-link" id="btn-copiar">Copiar dados</button>
+      <button class="sec-link" id="btn-enviar">Enviar dados</button>
     </div>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
@@ -751,13 +788,9 @@ function renderDetalhes(id) {
     });
   }
 
-  // Copiar dados da conta
-  const $cp = document.getElementById('btn-copiar');
-  if ($cp) $cp.addEventListener('click', () => {
-    copiarTexto(textoDadosConta(c))
-      .then(() => toast('Dados copiados ✓'))
-      .catch(() => toast('Não foi possível copiar'));
-  });
+  // Enviar dados da conta (compartilhar/copiar, com ou sem observações)
+  const $env = document.getElementById('btn-enviar');
+  if ($env) $env.addEventListener('click', () => abrirEnvioDados(c));
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estoque
   const $cancelar = document.getElementById('btn-cancelar-venda');
@@ -1255,7 +1288,7 @@ function renderFarmDetalhes(id) {
 
     <div class="section-row">
       <h2>Dados da conta</h2>
-      <button class="sec-link" id="btn-copiar">Copiar dados</button>
+      <button class="sec-link" id="btn-enviar">Enviar dados</button>
     </div>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
@@ -1321,13 +1354,9 @@ function renderFarmDetalhes(id) {
     });
   }
 
-  // Copiar dados da conta
-  const $cp = document.getElementById('btn-copiar');
-  if ($cp) $cp.addEventListener('click', () => {
-    copiarTexto(textoDadosConta(c))
-      .then(() => toast('Dados copiados ✓'))
-      .catch(() => toast('Não foi possível copiar'));
-  });
+  // Enviar dados da conta (compartilhar/copiar, com ou sem observações)
+  const $env = document.getElementById('btn-enviar');
+  if ($env) $env.addEventListener('click', () => abrirEnvioDados(c));
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estágio padrão
   const $cancelar = document.getElementById('btn-cancelar-venda');
