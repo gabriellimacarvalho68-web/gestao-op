@@ -45,12 +45,12 @@ function copiarTexto(texto) {
   });
 }
 
-// Monta o texto dos dados de uma conta (usuário, email, senha, e opcionalmente observações)
+// Monta o texto dos dados de uma conta — só os valores, sem rótulos, um por linha
 function textoDadosConta(c, incluirObs = true) {
-  const linhas = [`Usuário: ${c.username.replace(/^@/, '')}`];
-  if (c.email) linhas.push(`Email: ${c.email}`);
-  if (c.senha) linhas.push(`Senha: ${c.senha}`);
-  if (incluirObs && c.observacoes) linhas.push(`Observações: ${c.observacoes}`);
+  const linhas = [c.username.replace(/^@/, '')];
+  if (c.email) linhas.push(c.email);
+  if (c.senha) linhas.push(c.senha);
+  if (incluirObs && c.observacoes) linhas.push(c.observacoes);
   return linhas.join('\n');
 }
 
