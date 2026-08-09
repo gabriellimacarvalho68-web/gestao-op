@@ -45,6 +45,11 @@ function copiarTexto(texto) {
   });
 }
 
+// Botão pequeno de copiar (SVG) para um campo — tratado pelo handler [data-copiar]
+function copyBtnHTML(campo) {
+  return `<button class="copy-btn" type="button" data-copiar="${campo}" aria-label="Copiar"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg></button>`;
+}
+
 // Monta o texto dos dados de uma conta — só os valores, sem rótulos, um por linha
 function textoDadosConta(c, incluirObs = true) {
   const linhas = [c.username.replace(/^@/, '')];
@@ -723,18 +728,16 @@ function renderDetalhes(id) {
       </div>
     </div>
 
-    <div class="section-row">
-      <h2>Dados da conta</h2>
-      <button class="sec-link" id="btn-enviar">Enviar dados</button>
-    </div>
+    <h2>Dados da conta</h2>
     <div class="card detail-rows">
-      <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
-      <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}</span></div>
+      <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))} ${copyBtnHTML('username')}</span></div>
+      <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}${c.email ? ' ' + copyBtnHTML('email') : ''}</span></div>
       <div class="detail-row">
         <span class="k">Senha</span>
         <span class="v">
           <span id="senha-v">${c.senha ? '••••••••' : '—'}</span>
           ${c.senha ? '<button class="senha-toggle" id="senha-toggle">mostrar</button>' : ''}
+          ${c.senha ? copyBtnHTML('senha') : ''}
         </span>
       </div>
     </div>
@@ -754,7 +757,7 @@ function renderDetalhes(id) {
     </div>
 
     ${c.observacoes ? `
-      <h2>Observações</h2>
+      <div class="section-row"><h2>Observações</h2>${copyBtnHTML('observacoes')}</div>
       <div class="card"><p style="font-size:14px;color:var(--ink-2);white-space:pre-wrap;">${esc(c.observacoes)}</p></div>` : ''}
 
     <h2>Histórico</h2>
@@ -788,9 +791,17 @@ function renderDetalhes(id) {
     });
   }
 
-  // Enviar dados da conta (compartilhar/copiar, com ou sem observações)
-  const $env = document.getElementById('btn-enviar');
-  if ($env) $env.addEventListener('click', () => abrirEnvioDados(c));
+  // Copiar campo individual (usuário, email, senha, observações)
+  document.querySelectorAll('[data-copiar]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const campo = btn.dataset.copiar;
+      const valor = campo === 'username' ? c.username.replace(/^@/, '') : (c[campo] || '');
+      if (!valor) return;
+      copiarTexto(valor)
+        .then(() => toast('Copiado ✓'))
+        .catch(() => toast('Não foi possível copiar'));
+    });
+  });
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estoque
   const $cancelar = document.getElementById('btn-cancelar-venda');
@@ -1286,10 +1297,7 @@ function renderFarmDetalhes(id) {
       </div>
     </div>
 
-    <div class="section-row">
-      <h2>Dados da conta</h2>
-      <button class="sec-link" id="btn-enviar">Enviar dados</button>
-    </div>
+    <h2>Dados da conta</h2>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
       <div class="detail-row"><span class="k">Plataforma</span><span class="v">${esc(c.plataforma) || '—'}</span></div>
@@ -1320,7 +1328,7 @@ function renderFarmDetalhes(id) {
     </div>
 
     ${c.observacoes ? `
-      <h2>Observações</h2>
+      <div class="section-row"><h2>Observações</h2>${copyBtnHTML('observacoes')}</div>
       <div class="card"><p style="font-size:14px;color:var(--ink-2);white-space:pre-wrap;">${esc(c.observacoes)}</p></div>` : ''}
 
     <h2>Histórico</h2>
@@ -1354,9 +1362,17 @@ function renderFarmDetalhes(id) {
     });
   }
 
-  // Enviar dados da conta (compartilhar/copiar, com ou sem observações)
-  const $env = document.getElementById('btn-enviar');
-  if ($env) $env.addEventListener('click', () => abrirEnvioDados(c));
+  // Copiar campo individual (usuário, email, senha, observações)
+  document.querySelectorAll('[data-copiar]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const campo = btn.dataset.copiar;
+      const valor = campo === 'username' ? c.username.replace(/^@/, '') : (c[campo] || '');
+      if (!valor) return;
+      copiarTexto(valor)
+        .then(() => toast('Copiado ✓'))
+        .catch(() => toast('Não foi possível copiar'));
+    });
+  });
 
   // Cancelar venda (comprador desistiu): desfaz o financeiro e volta ao estágio padrão
   const $cancelar = document.getElementById('btn-cancelar-venda');

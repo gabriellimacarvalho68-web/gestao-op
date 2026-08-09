@@ -281,6 +281,13 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
   background: none; border: none; color: var(--primary);
   font-family: inherit; font-size: 14px; cursor: pointer; padding: 0;
 }
+.copy-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-3); padding: 2px; margin-left: 6px;
+  vertical-align: middle; display: inline-flex; align-items: center;
+}
+.copy-btn svg { width: 15px; height: 15px; }
+.copy-btn:active { color: var(--primary); }
 
 /* ---------- Timeline ---------- */
 .timeline { position: relative; padding-left: 24px; }
