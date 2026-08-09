@@ -1299,14 +1299,15 @@ function renderFarmDetalhes(id) {
 
     <h2>Dados da conta</h2>
     <div class="card detail-rows">
-      <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))}</span></div>
-      <div class="detail-row"><span class="k">Plataforma</span><span class="v">${esc(c.plataforma) || '—'}</span></div>
-      <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}</span></div>
+      <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))} ${copyBtnHTML('username')}</span></div>
+      <div class="detail-row"><span class="k">Plataforma</span><span class="v">${esc(c.plataforma) || '—'}${c.plataforma ? ' ' + copyBtnHTML('plataforma') : ''}</span></div>
+      <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}${c.email ? ' ' + copyBtnHTML('email') : ''}</span></div>
       <div class="detail-row">
         <span class="k">Senha</span>
         <span class="v">
           <span id="senha-v">${c.senha ? '••••••••' : '—'}</span>
           ${c.senha ? '<button class="senha-toggle" id="senha-toggle">mostrar</button>' : ''}
+          ${c.senha ? copyBtnHTML('senha') : ''}
         </span>
       </div>
     </div>
