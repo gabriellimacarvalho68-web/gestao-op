@@ -561,6 +561,24 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 .field-hint { font-size: 12px; color: var(--ink-3); margin-top: 6px; }
 .detail-row .k-sub { color: var(--ink-3); font-size: 12px; }
 
+/* Emails (reserva) */
+.email-item {
+  background: var(--card); border-radius: var(--radius); padding: 14px 16px;
+  box-shadow: var(--shadow-card); margin-bottom: 10px;
+  display: flex; align-items: center; gap: 12px;
+}
+.email-item.usado { opacity: 0.55; }
+.email-item .ei-main { flex: 1; min-width: 0; }
+.ei-email { font-weight: 600; font-size: 14px; word-break: break-all; display: flex; align-items: center; gap: 4px; }
+.ei-senha { font-size: 13px; color: var(--ink-2); margin-top: 3px; word-break: break-all; display: flex; align-items: center; gap: 4px; }
+.ei-actions { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.btn-mini {
+  background: #E9E9EB; color: var(--ink); border: none; border-radius: 100px;
+  font-family: inherit; font-size: 12px; font-weight: 600; padding: 7px 12px; cursor: pointer; white-space: nowrap;
+}
+.btn-mini.on { background: var(--primary); color: #fff; }
+.ei-del { background: none; border: none; color: var(--ink-3); font-size: 14px; cursor: pointer; padding: 2px 6px; }
+
 /* Barra de meta anual */
 .meta-bar {
   display: flex; align-items: center; gap: 8px;

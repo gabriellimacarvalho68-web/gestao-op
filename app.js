@@ -136,11 +136,13 @@ function router() {
     else renderFarmDashboard();
   }
   else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
+  else if (parts[0] === 'emails') renderEmails();
   else renderDashboard();
 
-  // Tab ativa (barra enxuta: Início + Backup)
+  // Tab ativa (barra enxuta: Início · Emails · Backup)
   const tab = (hash === '#/' || hash === '#') ? 'dashboard'
-    : (parts[0] === 'backup' ? 'backup' : '');
+    : (parts[0] === 'emails' ? 'emails'
+    : (parts[0] === 'backup' ? 'backup' : ''));
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -2028,6 +2030,122 @@ function renderFarmRecursos() {
     if (!btn) return;
     const r = DB.listarRecursosFarm().find(x => x.id === btn.dataset.edit);
     if (r) sheetRecurso(r);
+  });
+}
+
+/* ============================================================
+   EMAILS  (#/emails)
+   ============================================================ */
+const emailState = { filtro: 'Disponível' };
+
+function emailItemHTML(e) {
+  const usado = e.status === 'Usado';
+  const ico = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>';
+  return `
+    <div class="email-item ${usado ? 'usado' : ''}">
+      <div class="ei-main">
+        <div class="ei-email">${esc(e.email)} <button class="copy-btn" data-emcopy="${e.id}" data-campo="email" aria-label="Copiar email">${ico}</button></div>
+        <div class="ei-senha">${esc(e.senha) || '—'} <button class="copy-btn" data-emcopy="${e.id}" data-campo="senha" aria-label="Copiar senha">${ico}</button></div>
+      </div>
+      <div class="ei-actions">
+        <button class="btn-mini ${usado ? '' : 'on'}" data-toggle="${e.id}">${usado ? 'Reativar' : 'Marcar usado'}</button>
+        <button class="ei-del" data-del="${e.id}" aria-label="Excluir">✕</button>
+      </div>
+    </div>`;
+}
+
+function renderEmails() {
+  const cont = DB.contarEmails();
+  const lista = DB.listarEmails(emailState.filtro === 'Todos' ? null : emailState.filtro);
+  const filtros = [['Disponível', 'Disponíveis'], ['Usado', 'Usados'], ['Todos', 'Todos']];
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Início
+    </a>
+    <div class="page-head">
+      <div class="page-head-row">
+        <div><h1>Emails</h1><div class="subtitle">Reserva de emails comprados</div></div>
+        <button class="btn-small" id="btn-add-emails">+ Adicionar</button>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat"><div class="label">Disponíveis</div><div class="value">${cont.disponiveis}</div></div>
+      <div class="stat"><div class="label">Usados</div><div class="value">${cont.usados}</div></div>
+    </div>
+
+    <div class="chips" id="email-chips">
+      ${filtros.map(([v, r]) => `<button class="chip ${emailState.filtro === v ? 'active' : ''}" data-filtro="${v}">${r}</button>`).join('')}
+    </div>
+
+    <div id="emails-lista">
+      ${lista.length
+        ? lista.map(emailItemHTML).join('')
+        : `<div class="card empty"><p>Nenhum email aqui.<br>Toque em <strong>+ Adicionar</strong> e cole no formato <strong>email:senha</strong>.</p></div>`}
+    </div>
+  `;
+
+  // Adicionar emails em massa
+  document.getElementById('btn-add-emails').addEventListener('click', () => {
+    openSheet(`
+      <h3>Adicionar emails</h3>
+      <div class="form-group">
+        <label>Cole os emails (um por linha, formato email:senha)</label>
+        <textarea id="inp-emails" style="min-height:160px;" placeholder="email@dominio.com:senha" autocapitalize="none"></textarea>
+      </div>
+      <div class="form-error" id="em-err"></div>
+      <button class="btn btn-primary" id="save-emails">Adicionar</button>
+      <button class="btn btn-secondary" id="cancel-emails">Cancelar</button>
+    `, sheet => {
+      const inp = sheet.querySelector('#inp-emails');
+      setTimeout(() => inp.focus(), 50);
+      sheet.querySelector('#save-emails').addEventListener('click', () => {
+        const r = DB.adicionarEmails(inp.value);
+        if (r.adicionados === 0 && r.duplicados === 0 && r.invalidos === 0) {
+          const e = sheet.querySelector('#em-err');
+          e.textContent = 'Cole ao menos um email no formato email:senha.';
+          e.classList.add('show');
+          return;
+        }
+        closeSheet();
+        let msg = `${r.adicionados} adicionado(s)`;
+        if (r.duplicados) msg += ` · ${r.duplicados} repetido(s)`;
+        if (r.invalidos) msg += ` · ${r.invalidos} inválido(s)`;
+        toast(msg + ' ✓');
+        emailState.filtro = 'Disponível';
+        renderEmails();
+      });
+      sheet.querySelector('#cancel-emails').addEventListener('click', closeSheet);
+    });
+  });
+
+  // Filtros
+  document.getElementById('email-chips').addEventListener('click', e => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    emailState.filtro = chip.dataset.filtro;
+    renderEmails();
+  });
+
+  // Ações da lista
+  const $lista = document.getElementById('emails-lista');
+  $lista.querySelectorAll('[data-emcopy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const em = DB.listarEmails(null).find(x => x.id === btn.dataset.emcopy);
+      if (!em) return;
+      const valor = btn.dataset.campo === 'senha' ? em.senha : em.email;
+      copiarTexto(valor).then(() => toast('Copiado ✓')).catch(() => toast('Não foi possível copiar'));
+    });
+  });
+  $lista.querySelectorAll('[data-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => { DB.alternarEmail(btn.dataset.toggle); renderEmails(); });
+  });
+  $lista.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (confirm('Excluir este email?')) { DB.excluirEmail(btn.dataset.del); renderEmails(); }
+    });
   });
 }
 

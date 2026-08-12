@@ -39,6 +39,7 @@ const DB = (() => {
         obj.ofertas = obj.ofertas || [];
         obj.ofertas_historico = obj.ofertas_historico || [];
         obj.ofertas_grupos = obj.ofertas_grupos || [];
+        obj.emails = obj.emails || [];
         obj.meta_anual = obj.meta_anual != null ? obj.meta_anual : 10000;
         // Migração: custo passa a ser custo_proprio + fatias de recursos
         obj.farm.forEach(f => {
@@ -48,7 +49,7 @@ const DB = (() => {
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], meta_anual: 10000 };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], meta_anual: 10000 };
   }
 
   let data = load();
@@ -720,6 +721,60 @@ const DB = (() => {
     return v;
   }
 
+  // ============================================================
+  //   EMAILS — reserva de emails comprados (email:senha)
+  // ============================================================
+  // Cola em massa; cada item vira { email, senha, status: Disponível/Usado }.
+  // Divisor entre email e senha é o primeiro ":". Ignora duplicados (por email).
+  function adicionarEmails(texto) {
+    const tokens = String(texto || '').split(/\s+/).map(t => t.trim()).filter(Boolean);
+    let adicionados = 0, duplicados = 0, invalidos = 0;
+    tokens.forEach(t => {
+      const idx = t.indexOf(':');
+      if (idx < 1) { invalidos++; return; }
+      const email = t.slice(0, idx).trim();
+      const senha = t.slice(idx + 1).trim();
+      if (!email || !email.includes('@')) { invalidos++; return; }
+      if (data.emails.some(e => e.email.toLowerCase() === email.toLowerCase())) { duplicados++; return; }
+      data.emails.push({ id: uuid(), email, senha, status: 'Disponível', criado_em: now(), usado_em: null });
+      adicionados++;
+    });
+    persist();
+    return { adicionados, duplicados, invalidos };
+  }
+
+  function listarEmails(status) {
+    let lista = [...data.emails];
+    if (status === 'Disponível' || status === 'Usado') {
+      lista = lista.filter(e => e.status === status);
+    }
+    // Disponíveis primeiro; dentro de cada grupo, mais recentes primeiro
+    lista.sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'Disponível' ? -1 : 1;
+      return b.criado_em.localeCompare(a.criado_em);
+    });
+    return lista;
+  }
+
+  function alternarEmail(id) {
+    const e = data.emails.find(x => x.id === id);
+    if (!e) return null;
+    if (e.status === 'Usado') { e.status = 'Disponível'; e.usado_em = null; }
+    else { e.status = 'Usado'; e.usado_em = now(); }
+    persist();
+    return e;
+  }
+
+  function excluirEmail(id) {
+    data.emails = data.emails.filter(e => e.id !== id);
+    persist();
+  }
+
+  function contarEmails() {
+    const usados = data.emails.filter(e => e.status === 'Usado').length;
+    return { total: data.emails.length, usados, disponiveis: data.emails.length - usados };
+  }
+
   function resumoCompraVenda(periodo) {
     const desde = inicioPeriodo(periodo);
     const desdeISO = desde ? desde.toISOString() : null;
@@ -903,9 +958,10 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 6,
+      versao: 7,
       exportado_em: now(),
       meta_anual: data.meta_anual,
+      emails: data.emails,
       contas: data.contas,
       historico: data.historico,
       farm: data.farm,
@@ -946,6 +1002,7 @@ const DB = (() => {
       contas: obj.contas, historico: obj.historico,
       farm, farm_historico: farmHist, farm_recursos: farmRecursos,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
+      emails: Array.isArray(obj.emails) ? obj.emails : [],
       meta_anual: obj.meta_anual != null ? obj.meta_anual : 10000,
     };
     recalcularCustosFarm();
@@ -979,6 +1036,7 @@ const DB = (() => {
     resumoCompraVenda, resumoFarm, resumoOfertas, resumoOfertasGrupo, resumosOperacoes, resumoGeral, resumoGeralPeriodo,
     evolucaoMensal, atividadeRecente,
     getMetaAnual, setMetaAnual,
+    adicionarEmails, listarEmails, alternarEmail, excluirEmail, contarEmails,
     exportar, importar, totais,
   };
 })();
