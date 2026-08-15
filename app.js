@@ -649,15 +649,11 @@ function renderCadastro() {
       </div>
       <div class="form-group">
         <label>Email</label>
-        <div class="email-search">
-          <input name="email" id="conta-email" type="email" placeholder="Digite para buscar na reserva" autocapitalize="none" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="email-search-results">
-          <div class="email-search-results hidden" id="email-search-results" role="listbox"></div>
-        </div>
-        <div class="field-hint" id="email-search-hint">Digite pelo menos 2 caracteres para encontrar um email disponível.</div>
+        <input name="email" type="email" placeholder="email@exemplo.com" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
         <label>Senha</label>
-        <input name="senha" id="conta-senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
+        <input name="senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
         <label>Nome do fornecedor <span class="req">*</span></label>
@@ -684,77 +680,6 @@ function renderCadastro() {
     </form>
   `;
 
-  const emailsDisponiveis = DB.listarEmails('Disponível');
-  const $email = document.getElementById('conta-email');
-  const $senha = document.getElementById('conta-senha');
-  const $resultados = document.getElementById('email-search-results');
-  const $hint = document.getElementById('email-search-hint');
-  let emailReservaSelecionado = null;
-
-  if (!emailsDisponiveis.length) {
-    $hint.textContent = 'Nenhum email disponível na reserva. Você ainda pode preencher manualmente.';
-  }
-
-  function fecharBuscaEmail() {
-    $resultados.classList.add('hidden');
-    $email.setAttribute('aria-expanded', 'false');
-  }
-
-  function limparSelecaoEmail() {
-    if (!emailReservaSelecionado) return;
-    emailReservaSelecionado = null;
-    $hint.textContent = emailsDisponiveis.length
-      ? 'Digite pelo menos 2 caracteres para encontrar um email disponível.'
-      : 'Nenhum email disponível na reserva. Você ainda pode preencher manualmente.';
-  }
-
-  function atualizarBuscaEmail() {
-    const termo = $email.value.trim().toLowerCase();
-    if (emailReservaSelecionado && termo !== emailReservaSelecionado.email.toLowerCase()) {
-      limparSelecaoEmail();
-      $senha.value = '';
-    }
-    if (emailReservaSelecionado || termo.length < 2 || !emailsDisponiveis.length) {
-      fecharBuscaEmail();
-      return;
-    }
-
-    const encontrados = emailsDisponiveis
-      .filter(e => e.email.toLowerCase().includes(termo))
-      .slice(0, 5);
-    $resultados.innerHTML = encontrados.length
-      ? encontrados.map(e => `
-          <button type="button" class="email-search-option" role="option" data-email-reserva="${e.id}">
-            <span>${esc(e.email)}</span>
-            <small>${esc(e.senha) || 'Sem senha'}</small>
-          </button>`).join('')
-      : '<div class="email-search-empty">Nenhum email disponível encontrado.</div>';
-    $resultados.classList.remove('hidden');
-    $email.setAttribute('aria-expanded', 'true');
-  }
-
-  $email.addEventListener('input', atualizarBuscaEmail);
-  $email.addEventListener('focus', atualizarBuscaEmail);
-  $email.addEventListener('keydown', e => {
-    if (e.key === 'Escape') fecharBuscaEmail();
-  });
-  $email.addEventListener('blur', () => setTimeout(fecharBuscaEmail, 120));
-  $senha.addEventListener('input', () => {
-    if (emailReservaSelecionado && $senha.value !== emailReservaSelecionado.senha) limparSelecaoEmail();
-  });
-  $resultados.addEventListener('click', e => {
-    const opcao = e.target.closest('[data-email-reserva]');
-    if (!opcao) return;
-    const selecionado = emailsDisponiveis.find(item => item.id === opcao.dataset.emailReserva);
-    if (!selecionado) return;
-    emailReservaSelecionado = selecionado;
-    $email.value = selecionado.email;
-    $senha.value = selecionado.senha;
-    $hint.textContent = 'Email da reserva selecionado. Será marcado como usado ao cadastrar.';
-    fecharBuscaEmail();
-    $senha.focus();
-  });
-
   document.getElementById('form-conta').addEventListener('submit', e => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -767,9 +692,8 @@ function renderCadastro() {
         preco_compra: f.get('preco_compra'),
         status: f.get('status'),
         observacoes: f.get('observacoes'),
-        email_reserva_id: emailReservaSelecionado ? emailReservaSelecionado.id : null,
       });
-      toast(emailReservaSelecionado ? 'Conta cadastrada e email marcado como usado ✓' : 'Conta cadastrada ✓');
+      toast('Conta cadastrada ✓');
       location.hash = '#/conta/' + conta.id;
     } catch (err) {
       const $err = document.getElementById('form-error');
@@ -1291,11 +1215,15 @@ function renderFarmCadastro() {
       </div>
       <div class="form-group">
         <label>Email</label>
-        <input name="email" type="email" placeholder="email@exemplo.com" autocapitalize="none" autocomplete="off">
+        <div class="email-search">
+          <input name="email" id="farm-email" type="email" placeholder="Digite para buscar na reserva" autocapitalize="none" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="farm-email-search-results">
+          <div class="email-search-results hidden" id="farm-email-search-results" role="listbox"></div>
+        </div>
+        <div class="field-hint" id="farm-email-search-hint">Digite pelo menos 2 caracteres para encontrar um email disponível.</div>
       </div>
       <div class="form-group">
         <label>Senha</label>
-        <input name="senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
+        <input name="senha" id="farm-senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
         <label>Custo de aquisição (R$)</label>
@@ -1324,6 +1252,77 @@ function renderFarmCadastro() {
     </form>
   `;
 
+  const emailsDisponiveis = DB.listarEmails('Disponível');
+  const $email = document.getElementById('farm-email');
+  const $senha = document.getElementById('farm-senha');
+  const $resultados = document.getElementById('farm-email-search-results');
+  const $hint = document.getElementById('farm-email-search-hint');
+  let emailReservaSelecionado = null;
+
+  if (!emailsDisponiveis.length) {
+    $hint.textContent = 'Nenhum email disponível na reserva. Você ainda pode preencher manualmente.';
+  }
+
+  function fecharBuscaEmail() {
+    $resultados.classList.add('hidden');
+    $email.setAttribute('aria-expanded', 'false');
+  }
+
+  function limparSelecaoEmail() {
+    if (!emailReservaSelecionado) return;
+    emailReservaSelecionado = null;
+    $hint.textContent = emailsDisponiveis.length
+      ? 'Digite pelo menos 2 caracteres para encontrar um email disponível.'
+      : 'Nenhum email disponível na reserva. Você ainda pode preencher manualmente.';
+  }
+
+  function atualizarBuscaEmail() {
+    const termo = $email.value.trim().toLowerCase();
+    if (emailReservaSelecionado && termo !== emailReservaSelecionado.email.toLowerCase()) {
+      limparSelecaoEmail();
+      $senha.value = '';
+    }
+    if (emailReservaSelecionado || termo.length < 2 || !emailsDisponiveis.length) {
+      fecharBuscaEmail();
+      return;
+    }
+
+    const encontrados = emailsDisponiveis
+      .filter(e => e.email.toLowerCase().includes(termo))
+      .slice(0, 5);
+    $resultados.innerHTML = encontrados.length
+      ? encontrados.map(e => `
+          <button type="button" class="email-search-option" role="option" data-email-reserva="${e.id}">
+            <span>${esc(e.email)}</span>
+            <small>${esc(e.senha) || 'Sem senha'}</small>
+          </button>`).join('')
+      : '<div class="email-search-empty">Nenhum email disponível encontrado.</div>';
+    $resultados.classList.remove('hidden');
+    $email.setAttribute('aria-expanded', 'true');
+  }
+
+  $email.addEventListener('input', atualizarBuscaEmail);
+  $email.addEventListener('focus', atualizarBuscaEmail);
+  $email.addEventListener('keydown', e => {
+    if (e.key === 'Escape') fecharBuscaEmail();
+  });
+  $email.addEventListener('blur', () => setTimeout(fecharBuscaEmail, 120));
+  $senha.addEventListener('input', () => {
+    if (emailReservaSelecionado && $senha.value !== emailReservaSelecionado.senha) limparSelecaoEmail();
+  });
+  $resultados.addEventListener('click', e => {
+    const opcao = e.target.closest('[data-email-reserva]');
+    if (!opcao) return;
+    const selecionado = emailsDisponiveis.find(item => item.id === opcao.dataset.emailReserva);
+    if (!selecionado) return;
+    emailReservaSelecionado = selecionado;
+    $email.value = selecionado.email;
+    $senha.value = selecionado.senha;
+    $hint.textContent = 'Email da reserva selecionado. Será marcado como usado ao adicionar ao farm.';
+    fecharBuscaEmail();
+    $senha.focus();
+  });
+
   document.getElementById('form-farm').addEventListener('submit', e => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -1337,8 +1336,9 @@ function renderFarmCadastro() {
         recursos: f.getAll('recurso'),
         status: f.get('status'),
         observacoes: f.get('observacoes'),
+        email_reserva_id: emailReservaSelecionado ? emailReservaSelecionado.id : null,
       });
-      toast('Conta adicionada ao farm ✓');
+      toast(emailReservaSelecionado ? 'Conta adicionada e email marcado como usado ✓' : 'Conta adicionada ao farm ✓');
       location.hash = '#/farm/conta/' + conta.id;
     } catch (err) {
       const $err = document.getElementById('form-error');
