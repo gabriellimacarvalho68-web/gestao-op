@@ -194,7 +194,7 @@ const DB = (() => {
     return data.contas.find(c => c.id === id) || null;
   }
 
-  function criarConta({ username, email, senha, fornecedor, preco_compra, status, observacoes, data_compra }) {
+  function criarConta({ username, email, senha, fornecedor, preco_compra, status, observacoes, data_compra, email_reserva_id }) {
     username = String(username || '').trim();
     fornecedor = String(fornecedor || '').trim();
     if (!username) throw new Error('Username é obrigatório.');
@@ -202,6 +202,15 @@ const DB = (() => {
     if (preco_compra == null || preco_compra === '' || isNaN(Number(preco_compra)))
       throw new Error('Valor de compra é obrigatório.');
     if (usernameExiste(username)) throw new Error('Já existe uma conta com esse username.');
+
+    let emailReserva = null;
+    if (email_reserva_id) {
+      emailReserva = data.emails.find(e => e.id === email_reserva_id);
+      if (!emailReserva) throw new Error('O email selecionado não existe mais na reserva.');
+      if (emailReserva.status !== 'Disponível') throw new Error('O email selecionado já foi usado. Escolha outro.');
+      email = emailReserva.email;
+      senha = emailReserva.senha;
+    }
 
     const conta = {
       id: uuid(),
@@ -220,6 +229,10 @@ const DB = (() => {
       atualizado_em: now(),
     };
     data.contas.push(conta);
+    if (emailReserva) {
+      emailReserva.status = 'Usado';
+      emailReserva.usado_em = now();
+    }
     addHistorico(conta.id, 'Conta criada', `Conta @${conta.username} cadastrada.`);
     addHistorico(conta.id, 'Compra registrada', `Compra de ${fmtBRL(conta.preco_compra)} — fornecedor ${conta.fornecedor}.`);
     persist();
