@@ -1,7 +1,7 @@
 /* Service worker — cache do app shell para funcionar offline.
    Estratégia: rede primeiro (ignorando o cache HTTP, para atualizações
    chegarem na hora); se estiver offline, usa a cópia guardada. */
-const CACHE = 'gestao-op-v32';
+const CACHE = 'gestao-op-v33';
 const ASSETS = [
   './',
   './index.html',
@@ -41,5 +41,20 @@ self.addEventListener('fetch', e => {
         return res;
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true }))
+  );
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const destino = e.notification.data?.url || './#/ttpost';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(janelas => {
+      const aberta = janelas[0];
+      if (aberta) {
+        aberta.navigate(destino);
+        return aberta.focus();
+      }
+      return clients.openWindow(destino);
+    })
   );
 });

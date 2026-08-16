@@ -44,6 +44,8 @@ const DB = (() => {
       estoques: [],
       comandos: [],
       eventos: [],
+      meta_seguidores: 0,
+      meta_notificadas: {},
       atualizado_em: null,
     };
   }
@@ -55,6 +57,9 @@ const DB = (() => {
     t.estoques = Array.isArray(t.estoques) ? t.estoques : [];
     t.comandos = Array.isArray(t.comandos) ? t.comandos : [];
     t.eventos = Array.isArray(t.eventos) ? t.eventos : [];
+    t.meta_seguidores = Number(t.meta_seguidores || 0);
+    t.meta_notificadas = t.meta_notificadas && typeof t.meta_notificadas === 'object'
+      ? t.meta_notificadas : {};
     t.atualizado_em = t.atualizado_em || null;
     t.custos.forEach(c => {
       if (!TTPOST_CUSTO_BASES.includes(c.base)) c.base = 'mensal_por_conta';
@@ -97,6 +102,9 @@ const DB = (() => {
         obj.farm_historico = obj.farm_historico || [];
         obj.farm_recursos = obj.farm_recursos || [];
         obj.ofertas = obj.ofertas || [];
+        obj.ofertas.forEach(o => {
+          if (o.investimento_em == null) o.investimento_em = o.criado_em || null;
+        });
         obj.ofertas_historico = obj.ofertas_historico || [];
         obj.ofertas_grupos = obj.ofertas_grupos || [];
         obj.emails = obj.emails || [];
@@ -251,11 +259,11 @@ const DB = (() => {
     return detalharCustoTtpostFarm(farmId).total;
   }
 
-  // Custo total = aquisição + recursos compartilhados + operação do TTpost.
+  // Custo total = aquisição + recursos compartilhados.
+  // Custos operacionais antigos do TTpost ficam preservados apenas no backup.
   function custoTotalFarm(f) {
     let total = Number(f.custo_proprio || 0);
     (f.recursos || []).forEach(rid => { total += custoRecursoPorConta(rid); });
-    total += custoOperacionalTtpostFarm(f.id);
     return total;
   }
 
@@ -414,6 +422,32 @@ const DB = (() => {
       const farm = data.farm.find(f => f.id === c.farm_id) || null;
       return { ...c, farm, media_dia: mediaSeguidoresTtpost(c), custo_operacional: custoOperacionalTtpostFarm(c.farm_id) };
     }).sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0));
+  }
+
+  // Meta única de seguidores, compartilhada por todas as contas do TTpost.
+  function getMetaSeguidoresTtpost() {
+    return Number(data.ttpost.meta_seguidores || 0);
+  }
+
+  function setMetaSeguidoresTtpost(valor) {
+    const meta = valor == null || valor === '' ? 0 : Number(valor);
+    if (!Number.isFinite(meta) || meta < 0) throw new Error('Informe uma meta válida.');
+    if (meta !== getMetaSeguidoresTtpost()) data.ttpost.meta_notificadas = {};
+    data.ttpost.meta_seguidores = meta;
+    data.ttpost.atualizado_em = now();
+    persist();
+    return meta;
+  }
+
+  function metaTtpostJaNotificada(contaId) {
+    return Boolean(data.ttpost.meta_notificadas[String(contaId || '')]);
+  }
+
+  function marcarMetaTtpostNotificada(contaId) {
+    const id = String(contaId || '');
+    if (!id) return;
+    data.ttpost.meta_notificadas[id] = now();
+    persist();
   }
 
   function listarEstoquesTtpost() {
@@ -981,7 +1015,7 @@ const DB = (() => {
   function garantirMes(grupoId, ano, mes) {
     let o = getOfertaMes(grupoId, ano, mes);
     if (!o) {
-      o = { id: uuid(), grupo_id: grupoId, ano, mes, investimento: 0, receitas: [], criado_em: now(), atualizado_em: now() };
+      o = { id: uuid(), grupo_id: grupoId, ano, mes, investimento: 0, investimento_em: null, receitas: [], criado_em: now(), atualizado_em: now() };
       data.ofertas.push(o);
     }
     return o;
@@ -997,6 +1031,7 @@ const DB = (() => {
     const o = garantirMes(grupoId, ano, mes);
     const anterior = o.investimento;
     o.investimento = Number(valor);
+    o.investimento_em = now();
     o.atualizado_em = now();
     const rotulo = MESES_NOME[mes] + '/' + o.ano;
     if (anterior === 0) {
@@ -1047,7 +1082,7 @@ const DB = (() => {
   //   RESUMOS PADRONIZADOS — consumidos pelo Dashboard Geral
   //   Modelo REALIZADO: só contas vendidas entram em receita/investimento/
   //   lucro/ROI. O estoque não entra (mostrado à parte como capital parado).
-  //   Cada resumo aceita um período: 'mes' | '6meses' | 'tudo'.
+  //   Cada resumo aceita um período: 'hoje' | 'mes' | '6meses' | 'tudo'.
   //   Toda nova operação só precisa expor um resumo neste formato.
   // ============================================================
   function roiDe(receita, investimento) {
@@ -1057,6 +1092,7 @@ const DB = (() => {
   // Data inicial do período (null = tudo). Filtra pela data de realização.
   function inicioPeriodo(periodo) {
     const agora = new Date();
+    if (periodo === 'hoje') return new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
     if (periodo === 'mes') return new Date(agora.getFullYear(), agora.getMonth(), 1);
     if (periodo === '6meses') return new Date(agora.getFullYear(), agora.getMonth() - 5, 1);
     if (periodo === 'ano') return new Date(agora.getFullYear(), 0, 1);
@@ -1169,10 +1205,16 @@ const DB = (() => {
   // Resumo COMBINADO de todos os nichos (usado no card do dashboard)
   function resumoOfertas(periodo) {
     const desde = inicioPeriodo(periodo);
+    const hoje = periodo === 'hoje';
+    const noRange = iso => !desde || (iso && new Date(iso) >= desde);
     const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
-    const meses = data.ofertas.filter(o => mesNoRange(o.ano, o.mes));
-    const investimento = meses.reduce((s, o) => s + Number(o.investimento || 0), 0);
-    const receita = meses.reduce((s, o) => s + totalReceitasMes(o), 0);
+    const meses = data.ofertas.filter(o => hoje || mesNoRange(o.ano, o.mes));
+    const investimento = meses.reduce((s, o) => s + (hoje
+      ? (noRange(o.investimento_em) ? Number(o.investimento || 0) : 0)
+      : Number(o.investimento || 0)), 0);
+    const receita = meses.reduce((s, o) => s + (hoje
+      ? o.receitas.filter(r => noRange(r.data)).reduce((t, r) => t + Number(r.valor || 0), 0)
+      : totalReceitasMes(o)), 0);
     const agora = new Date();
     const lancamentosMes = data.ofertas
       .filter(o => o.ano === agora.getFullYear() && o.mes === agora.getMonth())
@@ -1188,10 +1230,16 @@ const DB = (() => {
   // Resumo de UM nicho (usado na tela de Ofertas)
   function resumoOfertasGrupo(grupoId, periodo) {
     const desde = inicioPeriodo(periodo);
+    const hoje = periodo === 'hoje';
+    const noRange = iso => !desde || (iso && new Date(iso) >= desde);
     const mesNoRange = (ano, mes) => !desde || new Date(ano, mes, 1) >= desde;
-    const meses = data.ofertas.filter(o => o.grupo_id === grupoId && mesNoRange(o.ano, o.mes));
-    const investimento = meses.reduce((s, o) => s + Number(o.investimento || 0), 0);
-    const receita = meses.reduce((s, o) => s + totalReceitasMes(o), 0);
+    const meses = data.ofertas.filter(o => o.grupo_id === grupoId && (hoje || mesNoRange(o.ano, o.mes)));
+    const investimento = meses.reduce((s, o) => s + (hoje
+      ? (noRange(o.investimento_em) ? Number(o.investimento || 0) : 0)
+      : Number(o.investimento || 0)), 0);
+    const receita = meses.reduce((s, o) => s + (hoje
+      ? o.receitas.filter(r => noRange(r.data)).reduce((t, r) => t + Number(r.valor || 0), 0)
+      : totalReceitasMes(o)), 0);
     return { receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento) };
   }
 
@@ -1208,7 +1256,7 @@ const DB = (() => {
   }
 
   // Resumo geral filtrado por período (soma dos resumos das operações).
-  // periodo: 'mes' | '6meses' | 'tudo'
+  // periodo: 'hoje' | 'mes' | '6meses' | 'tudo'
   function resumoGeralPeriodo(periodo) {
     return resumoGeral(periodo);
   }
@@ -1313,7 +1361,7 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 8,
+      versao: 9,
       exportado_em: now(),
       meta_anual: data.meta_anual,
       emails: data.emails,
@@ -1345,6 +1393,9 @@ const DB = (() => {
     if (farm.some(f => !f.id || !f.username))
       throw new Error('Backup corrompido: farm sem id/username.');
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
+    ofertas.forEach(o => {
+      if (o.investimento_em == null) o.investimento_em = o.criado_em || null;
+    });
     const ofertasHist = Array.isArray(obj.ofertas_historico) ? obj.ofertas_historico : [];
     const ofertasGrupos = Array.isArray(obj.ofertas_grupos) ? obj.ofertas_grupos : [];
     const ttpost = normalizarTtpost(obj.ttpost);
@@ -1402,6 +1453,8 @@ const DB = (() => {
     adicionarEmails, listarEmails, alternarEmail, excluirEmail, contarEmails,
     listarCustosTtpost, salvarCustoTtpost, excluirCustoTtpost,
     listarContasTtpost, salvarContaTtpost, excluirContaTtpost, rankingTtpost,
+    getMetaSeguidoresTtpost, setMetaSeguidoresTtpost,
+    metaTtpostJaNotificada, marcarMetaTtpostNotificada,
     listarEstoquesTtpost, salvarEstoqueTtpost, excluirEstoqueTtpost,
     resumoTtpost, detalharCustoTtpostFarm, custoOperacionalTtpostFarm,
     exportar, importar, totais,

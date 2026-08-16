@@ -91,6 +91,38 @@ const TTPOST_BRIDGE = (() => {
   return { state, setToken, disconnect, refresh };
 })();
 
+// Preferências exclusivamente visuais deste aparelho.
+const APP_PREFS = (() => {
+  const KEY = 'gestao-op-ui-preferences-v1';
+  const DEFAULTS = {
+    roi_formato: 'percentual',
+    ranking_expandido: false,
+    operacoes_abertas: {},
+  };
+
+  function get() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+      return {
+        ...DEFAULTS,
+        ...(saved && typeof saved === 'object' ? saved : {}),
+        operacoes_abertas: saved?.operacoes_abertas && typeof saved.operacoes_abertas === 'object'
+          ? saved.operacoes_abertas : {},
+      };
+    } catch (_err) {
+      return { ...DEFAULTS, operacoes_abertas: {} };
+    }
+  }
+
+  function set(patch) {
+    const next = { ...get(), ...patch };
+    localStorage.setItem(KEY, JSON.stringify(next));
+    return next;
+  }
+
+  return { get, set };
+})();
+
 // Estado da lista (persiste enquanto navega)
 const listaState = { busca: '', status: 'Todas', ordenar: 'recente' };
 const farmListaState = { busca: '', status: 'Todas', ordenar: 'recente' };
@@ -195,6 +227,14 @@ function fmtPct(v) {
   return Number(v || 0).toFixed(1).replace('.', ',') + '%';
 }
 
+// ROI de 100% equivale a 2,0x; ROI de 200% equivale a 3,0x.
+function fmtROI(v) {
+  if (APP_PREFS.get().roi_formato === 'multiplicador') {
+    return (1 + Number(v || 0) / 100).toFixed(1).replace('.', ',') + 'x';
+  }
+  return fmtPct(v);
+}
+
 /* ============================================================
    ROTEADOR
    ============================================================ */
@@ -208,6 +248,7 @@ function router() {
   else if (parts[0] === 'nova') renderCadastro();
   else if (parts[0] === 'backup') renderBackup();
   else if (parts[0] === 'ttpost') renderTtpost();
+  else if (parts[0] === 'configuracoes') renderConfiguracoes();
   else if (parts[0] === 'conta' && parts[1]) renderDetalhes(parts[1]);
   else if (parts[0] === 'venda' && parts[1]) renderVenda(parts[1]);
   else if (parts[0] === 'editar' && parts[1]) renderEditarConta(parts[1]);
@@ -224,11 +265,12 @@ function router() {
   else if (parts[0] === 'emails') renderEmails();
   else renderDashboard();
 
-  // Tab ativa (barra enxuta: Início · Emails · TTpost · Backup)
+  // Tab ativa (barra enxuta: Início · Emails · TTpost · Backup · Config.)
   const tab = (hash === '#/' || hash === '#') ? 'dashboard'
     : (parts[0] === 'emails' ? 'emails'
     : (parts[0] === 'ttpost' ? 'ttpost'
-    : (parts[0] === 'backup' ? 'backup' : '')));
+    : (parts[0] === 'backup' ? 'backup'
+    : (parts[0] === 'configuracoes' ? 'configuracoes' : ''))));
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -236,13 +278,22 @@ function router() {
 }
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', router);
-setInterval(() => {
+
+async function sincronizarTtpost() {
   const bridge = TTPOST_BRIDGE.state();
-  if (!location.hash.startsWith('#/ttpost') || !bridge.configured || bridge.refreshing) return;
-  TTPOST_BRIDGE.refresh()
-    .then(() => renderTtpost(true))
-    .catch(() => renderTtpost(true));
-}, 60000);
+  if (!bridge.configured || bridge.refreshing || document.hidden) return;
+  try {
+    await TTPOST_BRIDGE.refresh();
+    await verificarMetasTtpost(ttpostRankingRemoto(TTPOST_BRIDGE.state().snapshot));
+  } catch (_err) { /* o estado da ponte já guarda o erro */ }
+  if (location.hash.startsWith('#/ttpost')) renderTtpost(true);
+}
+
+setInterval(sincronizarTtpost, 60000);
+window.addEventListener('load', sincronizarTtpost);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) sincronizarTtpost();
+});
 
 /* ============================================================
    COMPONENTES
@@ -302,24 +353,30 @@ const OP_SLUG = { 'Compra/Venda': 'cv', 'Farm': 'farm', 'Ofertas': 'ofertas' };
 
 function opCardHTML(op) {
   const cor = OP_COR[op.id] || '#007AFF';
+  const aberta = APP_PREFS.get().operacoes_abertas[op.id] !== false;
   let extra = '';
   if (op.id === 'compra-venda') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.estoque} em estoque (${fmtBRL(op.extra.capitalEstoque)})`;
   else if (op.id === 'farm') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.emFarm} em farm (${fmtBRL(op.extra.capitalFarm)})`;
   else if (op.id === 'ofertas') extra = `${op.extra.nichos} nicho(s) · ${op.extra.lancamentosMes} lançamento(s) no mês`;
   return `
-    <a class="op-card" href="${op.rota}" style="--op-cor:${cor}">
-      <div class="op-head">
-        <span class="op-dot"></span>
-        <span class="op-name">${esc(op.nome)}</span>
-        <span class="op-lucro ${op.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(op.lucro)}</span>
-      </div>
-      <div class="op-metrics">
-        <div><span class="m-label">Receita</span><span class="m-val">${fmtBRL(op.receita)}</span></div>
-        <div><span class="m-label">Investimento</span><span class="m-val">${fmtBRL(op.investimento)}</span></div>
-        <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${op.investimento > 0 ? fmtPct(op.roi) : '—'}</span></div>
-      </div>
-      <div class="op-extra">${extra}<span class="op-chevron">›</span></div>
-    </a>`;
+    <article class="op-card ${aberta ? '' : 'collapsed'}" style="--op-cor:${cor}">
+      <a class="op-card-link" href="${op.rota}">
+        <div class="op-head">
+          <span class="op-dot"></span>
+          <span class="op-name">${esc(op.nome)}</span>
+          <span class="op-lucro ${op.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(op.lucro)}</span>
+        </div>
+        <div class="op-details">
+          <div class="op-metrics">
+            <div><span class="m-label">Receita</span><span class="m-val">${fmtBRL(op.receita)}</span></div>
+            <div><span class="m-label">Investimento</span><span class="m-val">${fmtBRL(op.investimento)}</span></div>
+            <div><span class="m-label">ROI</span><span class="m-val ${op.roi >= 0 ? 'pos' : 'neg'}">${op.investimento > 0 ? fmtROI(op.roi) : '—'}</span></div>
+          </div>
+          <div class="op-extra">${extra}<span class="op-chevron">›</span></div>
+        </div>
+      </a>
+      <button class="collapse-toggle op-toggle ${aberta ? 'open' : ''}" type="button" data-op-toggle="${op.id}" aria-label="${aberta ? 'Minimizar' : 'Expandir'} ${esc(op.nome)}" aria-expanded="${aberta}">⌄</button>
+    </article>`;
 }
 
 function atividadeItemHTML(a) {
@@ -334,10 +391,10 @@ function atividadeItemHTML(a) {
     </a>`;
 }
 
-// Estado do dashboard (persiste enquanto navega): período do card azul e atividade
-const PERIODOS = ['mes', '6meses', 'tudo'];
-const PERIODO_LABEL = { mes: 'Este mês', '6meses': 'Últimos 6 meses', tudo: 'Tudo (acumulado)' };
-const dashState = { periodo: '6meses', atividadeAberta: false };
+// Estado do dashboard (persiste enquanto navega): período do card azul.
+const PERIODOS = ['hoje', 'mes', '6meses', 'tudo'];
+const PERIODO_LABEL = { hoje: 'Hoje', mes: 'Este mês', '6meses': 'Últimos 6 meses', tudo: 'Tudo (acumulado)' };
+const dashState = { periodo: '6meses' };
 
 // Barra de meta anual (lucro do ano / meta) — topo do dashboard
 function metaBarHTML() {
@@ -359,9 +416,6 @@ function metaBarHTML() {
 function renderDashboard() {
   const g = DB.resumoGeralPeriodo(dashState.periodo);
   const ops = DB.resumosOperacoes('mes'); // cards de operação = mês atual
-  const atividade = DB.atividadeRecente(12);
-  const aberta = dashState.atividadeAberta;
-  const mostradas = aberta ? atividade : atividade.slice(0, 1);
 
   $view.innerHTML = `
     ${metaBarHTML()}
@@ -378,7 +432,7 @@ function renderDashboard() {
       </div>
       <div class="geral-top">
         <span class="geral-label">Lucro</span>
-        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${g.investimento > 0 ? fmtPct(g.roi) : '—'}</span>
+        <span class="geral-roi ${g.roi >= 0 ? 'pos' : 'neg'}">ROI ${g.investimento > 0 ? fmtROI(g.roi) : '—'}</span>
       </div>
       <div class="geral-lucro ${g.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(g.lucro)}</div>
       <div class="geral-metrics">
@@ -401,16 +455,6 @@ function renderDashboard() {
       <div class="chart-sub">Últimos 6 meses · lucro por operação · toque em um mês</div>
       <div class="chart-wrap" id="chart-wrap"></div>
     </div>
-
-    <h2>Atividade recente</h2>
-    <div class="card activity">
-      ${atividade.length
-        ? mostradas.map(atividadeItemHTML).join('')
-        : `<div class="empty" style="padding:24px;"><p>Nada por aqui ainda.<br>Suas ações vão aparecer nesta lista.</p></div>`}
-    </div>
-    ${atividade.length > 1
-      ? `<button class="ver-mais" id="toggle-atividade">${aberta ? 'Ver menos' : 'Ver mais (' + (atividade.length - 1) + ')'}<span class="vm-arrow ${aberta ? 'up' : ''}">⌄</span></button>`
-      : ''}
   `;
 
   const cicla = dir => {
@@ -421,8 +465,18 @@ function renderDashboard() {
   document.getElementById('periodo-prev').addEventListener('click', () => cicla(-1));
   document.getElementById('periodo-next').addEventListener('click', () => cicla(1));
 
-  const $ta = document.getElementById('toggle-atividade');
-  if ($ta) $ta.addEventListener('click', () => { dashState.atividadeAberta = !dashState.atividadeAberta; renderDashboard(); });
+  document.querySelectorAll('[data-op-toggle]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const prefs = APP_PREFS.get();
+      APP_PREFS.set({
+        operacoes_abertas: {
+          ...prefs.operacoes_abertas,
+          [btn.dataset.opToggle]: !(prefs.operacoes_abertas[btn.dataset.opToggle] !== false),
+        },
+      });
+      renderDashboard();
+    });
+  });
 
   // Editar meta do ano
   document.getElementById('meta-bar').addEventListener('click', () => {
@@ -1128,10 +1182,7 @@ function ttpostContaSheet(conta) {
         <label>ID do perfil ou serial do celular</label>
         <input id="ttp-profile" value="${esc(atual.profile_id || atual.device_serial || '')}" autocapitalize="none">
       </div>
-      <div class="ttp-form-grid">
-        <div class="form-group"><label>Seguidores</label><input id="ttp-followers" type="number" inputmode="numeric" min="0" value="${Number(atual.followers || 0)}"></div>
-        <div class="form-group"><label>Meta</label><input id="ttp-goal" type="number" inputmode="numeric" min="0" value="${Number(atual.follower_goal || 0)}"></div>
-      </div>
+      <div class="form-group"><label>Seguidores</label><input id="ttp-followers" type="number" inputmode="numeric" min="0" value="${Number(atual.followers || 0)}"></div>
       <div class="ttp-form-grid">
         <div class="form-group"><label>Posts concluídos</label><input id="ttp-posts" type="number" inputmode="numeric" min="0" value="${Number(atual.posts_success || 0)}"></div>
         <div class="form-group"><label>Falhas</label><input id="ttp-fails" type="number" inputmode="numeric" min="0" value="${Number(atual.posts_failed || 0)}"></div>
@@ -1167,7 +1218,7 @@ function ttpostContaSheet(conta) {
           profile_id: provider === 'mobile' ? '' : identificador,
           device_serial: provider === 'mobile' ? identificador : '',
           followers: sheet.querySelector('#ttp-followers').value,
-          follower_goal: sheet.querySelector('#ttp-goal').value,
+          follower_goal: atual.follower_goal || 0,
           posts_success: sheet.querySelector('#ttp-posts').value,
           posts_failed: sheet.querySelector('#ttp-fails').value,
           warmup_minutes_total: sheet.querySelector('#ttp-warmup').value,
@@ -1296,13 +1347,88 @@ function ttpostRankingRemoto(snapshot) {
   }).sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0));
 }
 
+function idMetaTtpost(conta) {
+  return String(conta.profile_id || conta.id || conta.nome_perfil || '').trim().toLowerCase();
+}
+
+async function verificarMetasTtpost(ranking) {
+  const meta = DB.getMetaSeguidoresTtpost();
+  if (!meta || !Array.isArray(ranking) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return 0;
+  const atingidas = ranking.filter(c =>
+    c.active !== false
+    && Number(c.followers || 0) >= meta
+    && idMetaTtpost(c)
+    && !DB.metaTtpostJaNotificada(idMetaTtpost(c))
+  );
+  if (!atingidas.length) return 0;
+
+  const nomes = atingidas.map(c => c.nome_perfil || c.farm?.username || 'Perfil');
+  const titulo = atingidas.length === 1 ? 'Meta de seguidores atingida' : `${atingidas.length} contas atingiram a meta`;
+  const body = atingidas.length === 1
+    ? `${nomes[0]} chegou a ${_numero.format(meta)} seguidores.`
+    : `${nomes.slice(0, 3).join(', ')}${nomes.length > 3 ? ` e mais ${nomes.length - 3}` : ''} chegaram a ${_numero.format(meta)} seguidores.`;
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(titulo, {
+        body,
+        icon: 'icons/icon-192.png',
+        badge: 'icons/icon-192.png',
+        tag: `ttpost-meta-${meta}`,
+        data: { url: './#/ttpost' },
+      });
+    } else {
+      new Notification(titulo, { body, icon: 'icons/icon-192.png', tag: `ttpost-meta-${meta}` });
+    }
+    atingidas.forEach(c => DB.marcarMetaTtpostNotificada(idMetaTtpost(c)));
+    return atingidas.length;
+  } catch (_err) {
+    return 0;
+  }
+}
+
+function ttpostMetaSheet(ranking) {
+  openSheet(`
+    <h3>Meta de seguidores</h3>
+    <div class="form-group">
+      <label>Meta para todas as contas</label>
+      <input id="ttp-global-goal" type="number" inputmode="numeric" min="0" value="${DB.getMetaSeguidoresTtpost() || ''}" placeholder="Ex.: 10000">
+    </div>
+    <div class="field-hint ttp-sheet-hint">A mesma meta será aplicada a todas as contas. Quando uma conta atingir o valor, este celular recebe uma notificação.</div>
+    <div class="form-error" id="ttp-meta-err"></div>
+    <button class="btn btn-primary" id="ttp-save-meta">Salvar meta</button>
+    <button class="btn btn-secondary" id="ttp-cancel-meta">Cancelar</button>
+  `, sheet => {
+    sheet.querySelector('#ttp-save-meta').addEventListener('click', async () => {
+      const errEl = sheet.querySelector('#ttp-meta-err');
+      try {
+        DB.setMetaSeguidoresTtpost(sheet.querySelector('#ttp-global-goal').value);
+        let permission = typeof Notification === 'undefined' ? 'indisponivel' : Notification.permission;
+        if (permission === 'default') permission = await Notification.requestPermission();
+        closeSheet();
+        const notificadas = await verificarMetasTtpost(ranking);
+        if (permission === 'granted') toast(notificadas ? 'Meta salva e notificação enviada ✓' : 'Meta salva · notificações ativas ✓');
+        else toast('Meta salva · permita notificações no celular');
+        renderTtpost(true);
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.add('show');
+      }
+    });
+    sheet.querySelector('#ttp-cancel-meta').addEventListener('click', closeSheet);
+  });
+}
+
 function renderTtpost(skipRemoteRefresh = false) {
   const resumoLocal = DB.resumoTtpost();
   const bridge = TTPOST_BRIDGE.state();
   const snapshot = bridge.snapshot;
   const summary = snapshot?.summary || null;
   const ranking = ttpostRankingRemoto(snapshot);
-  const custos = DB.listarCustosTtpost();
+  const metaSeguidores = DB.getMetaSeguidoresTtpost();
+  const rankingExpandido = APP_PREFS.get().ranking_expandido;
+  const rankingVisivel = rankingExpandido ? ranking : ranking.slice(0, 3);
   const estoquesRemotos = Array.isArray(snapshot?.presets) ? snapshot.presets.map(p => ({
     id: `remote-${p.preset_id}`,
     nome: p.name || 'Preset',
@@ -1332,10 +1458,10 @@ function renderTtpost(skipRemoteRefresh = false) {
   $view.innerHTML = `
     <div class="page-head">
       <div class="page-head-row">
-        <div><h1>TTpost</h1><div class="subtitle">Operação, crescimento e custos</div></div>
+        <div><h1>TTpost</h1><div class="subtitle">Operação e crescimento</div></div>
         <div class="ttp-head-actions">
           <button class="btn-small" id="ttp-config-bridge">Conexão</button>
-          <button class="btn-small" id="ttp-add-account">+ Conta</button>
+          <button class="btn-small" id="ttp-meta">Meta</button>
         </div>
       </div>
     </div>
@@ -1352,44 +1478,33 @@ function renderTtpost(skipRemoteRefresh = false) {
       <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${snapshot ? 'nas pastas dos Presets' : `${resumo.estoquesBaixos} estoque(s) baixo(s)`}</div></div>
     </div>
 
-    <div class="section-row"><h2>Ranking de seguidores</h2></div>
+    <div class="section-row"><h2>Ranking de seguidores</h2>${ranking.length > 3 ? `<button class="collapse-toggle section-toggle ${rankingExpandido ? 'open' : ''}" id="ttp-toggle-ranking" type="button" aria-label="${rankingExpandido ? 'Mostrar somente as três maiores contas' : 'Mostrar todas as contas'}" aria-expanded="${rankingExpandido}">⌄</button>` : ''}</div>
     <div class="ttp-ranking-head"><span>User</span><span>Qtd. seg.</span><span>Média seg./d</span></div>
     <div class="ttp-ranking">
-      ${ranking.length ? ranking.map((c, i) => {
+      ${ranking.length ? rankingVisivel.map((c, i) => {
         const nome = c.nome_perfil || c.farm?.username || 'Perfil';
         const media = c.media_dia == null ? '—' : `${c.media_dia >= 0 ? '+' : ''}${_numero.format(c.media_dia)}`;
-        const meta = Number(c.follower_goal || 0);
+        const meta = metaSeguidores;
         const pct = meta > 0 ? Math.min(100, Number(c.followers || 0) / meta * 100) : 0;
         const tag = c.id ? 'button' : 'div';
         const accountAttr = c.id ? ` data-ttp-account="${c.id}"` : '';
         return `<${tag} class="ttp-rank-row ${c.active === false ? 'inactive' : ''} ${c.remote_only ? 'remote-only' : ''}"${accountAttr}>
-          <span class="ttp-rank-user"><b class="ttp-position">#${i + 1}</b><span><strong>${esc(nome)}</strong><small>${TTPOST_SCOPE_LABEL[c.provider] || c.provider} · custo op. ${fmtBRL(c.custo_operacional)}</small></span></span>
+          <span class="ttp-rank-user"><b class="ttp-position">#${i + 1}</b><span><strong>${esc(nome)}</strong><small>${TTPOST_SCOPE_LABEL[c.provider] || c.provider}</small></span></span>
           <span class="ttp-followers">${_numero.format(c.followers)}</span>
           <span class="ttp-average ${c.media_dia > 0 ? 'pos' : c.media_dia < 0 ? 'neg' : ''}">${media}</span>
           ${meta > 0 ? `<span class="ttp-goal"><span style="--pct:${pct}%"></span><small>Meta ${_numero.format(meta)} · ${pct.toFixed(0)}%</small></span>` : '<span class="ttp-goal empty-goal"><small>Sem meta</small></span>'}
         </${tag}>`;
-      }).join('') : `<div class="card empty ttp-empty"><p>${bridge.configured ? 'O TTpost ainda não enviou seguidores.' : 'Conecte a ponte ou toque em <strong>+ Conta</strong> para montar o ranking.'}</p></div>`}
+      }).join('') : `<div class="card empty ttp-empty"><p>${bridge.configured ? 'O TTpost ainda não enviou seguidores.' : 'Conecte a ponte para receber o ranking automaticamente.'}</p></div>`}
     </div>
 
-    <div class="section-row"><h2>Estoque de vídeos</h2><button class="sec-link" id="ttp-add-stock">+ Adicionar</button></div>
+    <div class="section-row"><h2>Estoque de vídeos</h2></div>
     <div class="ttp-stock-list">
       ${estoques.length ? estoques.map(e => {
         const baixo = !e.remoto && Number(e.disponiveis) <= Number(e.minimo);
         const tag = e.remoto ? 'div' : 'button';
         const stockAttr = e.remoto ? '' : ` data-ttp-stock="${e.id}"`;
         return `<${tag} class="ttp-stock-row"${stockAttr}><span><strong>${esc(e.nome)}</strong><small>${esc(e.pasta) || 'Pasta ainda não informada'}</small></span><b class="${baixo ? 'neg' : ''}">${e.disponiveis}</b></${tag}>`;
-      }).join('') : '<div class="card ttp-compact-empty">Adicione as pastas para acompanhar quantos vídeos ainda restam.</div>'}
-    </div>
-
-    <div class="section-row"><h2>Custos operacionais</h2><button class="sec-link" id="ttp-add-cost">+ Adicionar</button></div>
-    <div class="card ttp-cost-summary">
-      <span>Custo operacional calculado</span><b>${fmtBRL(resumo.custoOperacional)}</b>
-      <small>Aquisição e proxies continuam separados no Farm.</small>
-    </div>
-    <div class="ttp-cost-list">
-      ${custos.length ? custos.map(c => `<button class="ttp-cost-row" data-ttp-cost="${c.id}">
-        <span><strong>${esc(c.nome)}</strong><small>${TTPOST_BASE_LABEL[c.base]} · ${TTPOST_SCOPE_LABEL[c.escopo]}</small></span><b>${fmtBRL(c.valor)}</b>
-      </button>`).join('') : '<div class="card ttp-compact-empty">Crie custos com o nome e o valor que você quiser. A base escolhida define o cálculo automático.</div>'}
+      }).join('') : '<div class="card ttp-compact-empty">Os estoques aparecerão aqui quando o TTpost enviar os Presets.</div>'}
     </div>
 
     <div class="section-row"><h2>Central remota</h2></div>
@@ -1405,14 +1520,14 @@ function renderTtpost(skipRemoteRefresh = false) {
 
   document.getElementById('ttp-config-bridge').addEventListener('click', ttpostBridgeSheet);
   document.getElementById('ttp-open-bridge').addEventListener('click', ttpostBridgeSheet);
-  document.getElementById('ttp-add-account').addEventListener('click', () => ttpostContaSheet(null));
-  document.getElementById('ttp-add-cost').addEventListener('click', () => ttpostCustoSheet(null));
-  document.getElementById('ttp-add-stock').addEventListener('click', () => ttpostEstoqueSheet(null));
+  document.getElementById('ttp-meta').addEventListener('click', () => ttpostMetaSheet(ranking));
+  const rankingToggle = document.getElementById('ttp-toggle-ranking');
+  if (rankingToggle) rankingToggle.addEventListener('click', () => {
+    APP_PREFS.set({ ranking_expandido: !APP_PREFS.get().ranking_expandido });
+    renderTtpost(true);
+  });
   document.querySelectorAll('[data-ttp-account]').forEach(btn => btn.addEventListener('click', () => {
     ttpostContaSheet(DB.listarContasTtpost().find(c => c.id === btn.dataset.ttpAccount));
-  }));
-  document.querySelectorAll('[data-ttp-cost]').forEach(btn => btn.addEventListener('click', () => {
-    ttpostCustoSheet(DB.listarCustosTtpost().find(c => c.id === btn.dataset.ttpCost));
   }));
   document.querySelectorAll('[data-ttp-stock]').forEach(btn => btn.addEventListener('click', () => {
     ttpostEstoqueSheet(DB.listarEstoquesTtpost().find(e => e.id === btn.dataset.ttpStock));
@@ -1423,6 +1538,7 @@ function renderTtpost(skipRemoteRefresh = false) {
     refreshButton.textContent = 'Atualizando...';
     try {
       await TTPOST_BRIDGE.refresh();
+      await verificarMetasTtpost(ttpostRankingRemoto(TTPOST_BRIDGE.state().snapshot));
       toast('Dados atualizados ✓');
     } catch (err) {
       toast(err.message);
@@ -1431,10 +1547,49 @@ function renderTtpost(skipRemoteRefresh = false) {
   });
 
   if (!skipRemoteRefresh && bridge.configured && !bridge.refreshing) {
-    TTPOST_BRIDGE.refresh()
-      .then(() => { if (location.hash.startsWith('#/ttpost')) renderTtpost(true); })
-      .catch(() => { if (location.hash.startsWith('#/ttpost')) renderTtpost(true); });
+    sincronizarTtpost();
   }
+}
+
+/* ============================================================
+   CONFIGURAÇÕES  (#/configuracoes)
+   ============================================================ */
+function renderConfiguracoes() {
+  const formato = APP_PREFS.get().roi_formato;
+  const opcoes = [
+    ['percentual', 'Percentual', 'Exibe 100,0% ou 200,0%'],
+    ['multiplicador', 'Multiplicador', 'Exibe 2,0x ou 3,0x'],
+  ];
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Início
+    </a>
+    <div class="page-head">
+      <h1>Configurações</h1>
+      <div class="subtitle">Preferências de exibição do app</div>
+    </div>
+
+    <div class="card settings-card">
+      <div class="setting-title">Formato do ROI</div>
+      <div class="setting-options">
+        ${opcoes.map(([valor, titulo, descricao]) => `
+          <button class="setting-option ${formato === valor ? 'active' : ''}" type="button" data-roi-format="${valor}" aria-pressed="${formato === valor}">
+            <span><strong>${titulo}</strong><small>${descricao}</small></span>
+            <b>${formato === valor ? '✓' : ''}</b>
+          </button>`).join('')}
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll('[data-roi-format]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      APP_PREFS.set({ roi_formato: btn.dataset.roiFormat });
+      toast('Formato do ROI atualizado ✓');
+      renderConfiguracoes();
+    });
+  });
 }
 
 /* ============================================================
@@ -1459,7 +1614,6 @@ function renderBackup() {
       <div class="detail-row"><span class="k">Contas em farm</span><span class="v">${t.farm}</span></div>
       <div class="detail-row"><span class="k">Meses de ofertas</span><span class="v">${t.ofertas}</span></div>
       <div class="detail-row"><span class="k">Contas no TTpost</span><span class="v">${t.ttpostContas}</span></div>
-      <div class="detail-row"><span class="k">Custos personalizados</span><span class="v">${t.ttpostCustos}</span></div>
       <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos + t.farmEventos + t.ofertasEventos}</span></div>
       <div class="detail-row"><span class="k">Último backup</span><span class="v">${ultimo ? fmtDataHora(ultimo) : 'Nunca'}</span></div>
     </div>
@@ -1901,7 +2055,6 @@ function renderFarmDetalhes(id) {
         const n = DB.contasDoRecurso(rid);
         return `<div class="detail-row"><span class="k">${esc(r.nome)} <span class="k-sub">(÷${n})</span></span><span class="v">${fmtBRL(DB.custoRecursoPorConta(rid))}</span></div>`;
       }).join('')}
-      <div class="detail-row"><span class="k">Operação TTpost</span><span class="v">${fmtBRL(DB.custoOperacionalTtpostFarm(c.id))}</span></div>
       <div class="detail-row"><span class="k">Custo total</span><span class="v" style="font-weight:700;">${fmtBRL(c.custo)}</span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
@@ -2317,7 +2470,7 @@ function renderOfertas(param) {
       <div class="stat wide">
         <div class="label">Lucro do nicho</div>
         <div class="value ${res.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(res.lucro)}</div>
-        <div class="sub">ROI de ${res.investimento > 0 ? fmtPct(res.roi) : '—'}</div>
+        <div class="sub">ROI de ${res.investimento > 0 ? fmtROI(res.roi) : '—'}</div>
       </div>
       <div class="stat"><div class="label">Receita</div><div class="value">${fmtBRL(res.receita)}</div></div>
       <div class="stat"><div class="label">Investimento</div><div class="value">${fmtBRL(res.investimento)}</div></div>
@@ -2336,7 +2489,7 @@ function renderOfertas(param) {
       </div>
       <div class="detail-row"><span class="k">Receita do mês</span><span class="v">${fmtBRL(receitaMes)}</span></div>
       <div class="detail-row"><span class="k">Lucro do mês</span><span class="v ${lucroMes >= 0 ? 'pos' : 'neg'}">${fmtBRL(lucroMes)}</span></div>
-      <div class="detail-row"><span class="k">ROI do mês</span><span class="v ${roiMes >= 0 ? 'pos' : 'neg'}">${investimento > 0 ? fmtPct(roiMes) : '—'}</span></div>
+      <div class="detail-row"><span class="k">ROI do mês</span><span class="v ${roiMes >= 0 ? 'pos' : 'neg'}">${investimento > 0 ? fmtROI(roiMes) : '—'}</span></div>
     </div>
 
     <div class="section-row">

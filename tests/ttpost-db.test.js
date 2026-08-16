@@ -48,7 +48,15 @@ assert.strictEqual(DB.listarCustosTtpost().length, 4);
 
 const detalhe = DB.detalharCustoTtpostFarm(f1.id);
 assert.ok(Math.abs(detalhe.total - 27) < 0.01, `custo esperado 27; obtido ${detalhe.total}`);
-assert.ok(Math.abs(DB.getFarm(f1.id).custo - 27) < 0.01);
+assert.strictEqual(DB.getFarm(f1.id).custo, 0, 'custos antigos do TTpost não devem entrar no Farm');
+
+DB.setMetaSeguidoresTtpost(1000);
+assert.strictEqual(DB.getMetaSeguidoresTtpost(), 1000);
+assert.strictEqual(DB.metaTtpostJaNotificada('perfil-a'), false);
+DB.marcarMetaTtpostNotificada('perfil-a');
+assert.strictEqual(DB.metaTtpostJaNotificada('perfil-a'), true);
+DB.setMetaSeguidoresTtpost(2000);
+assert.strictEqual(DB.metaTtpostJaNotificada('perfil-a'), false, 'trocar a meta deve liberar uma nova notificação');
 
 DB.registrarVendaFarm(f1.id, { preco_venda: 100, data_venda: new Date().toISOString() });
 const contaVendida = DB.listarContasTtpost().find(c => c.farm_id === f1.id);
@@ -56,7 +64,7 @@ assert.strictEqual(contaVendida.active, false);
 assert.strictEqual(DB.resumoTtpost().comandosPendentes, 1);
 
 const backup = JSON.parse(DB.exportar());
-assert.strictEqual(backup.versao, 8);
+assert.strictEqual(backup.versao, 9);
 assert.strictEqual(backup.ttpost.custos.length, 4);
 DB.importar(JSON.stringify(backup));
 assert.strictEqual(DB.totais().ttpostContas, 2);
