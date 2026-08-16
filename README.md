@@ -1,6 +1,6 @@
 # Gestão Operações
 
-App (PWA) para gestão de compra e venda de contas do TikTok — estoque, vendas, lucro e histórico. Dados salvos localmente no dispositivo (localStorage), sem servidor.
+App (PWA) para gestão de compra e venda de contas do TikTok — estoque, vendas, lucro e histórico. Os dados de negócio continuam salvos localmente no dispositivo. A aba TTpost usa uma ponte Supabase opcional para receber seguidores, postagens e estoque de vídeos do computador.
 
 ## Como testar no computador
 
@@ -34,6 +34,17 @@ No iPhone:
 - Não limpe os dados do Safari nas configurações do iPhone, ou os registros serão apagados.
 - **Backup**: toque no ícone de nuvem no Dashboard → **Exportar backup** para salvar um arquivo com tudo (em Arquivos/iCloud, WhatsApp, email). Para recuperar, use **Importar backup** na mesma tela.
 - As senhas das contas são armazenadas **sem criptografia** no dispositivo — o app é de uso pessoal; não compartilhe o aparelho desbloqueado.
+- O token da ponte TTpost fica separado dos backups e nunca é publicado no código do site.
+
+## Ponte TTpost
+
+O código versionado da integração fica em `supabase/`:
+
+- `migrations/`: tabelas privadas de snapshots e comandos;
+- `functions/ttpost-bridge/`: Edge Function com tokens separados para o desktop e o painel;
+- `config.toml`: desliga a verificação JWT legada porque a função faz autenticação própria.
+
+As tabelas têm RLS habilitado e não concedem acesso aos papéis públicos. Os valores de `TTPOST_DESKTOP_TOKEN` e `TTPOST_DASHBOARD_TOKEN` existem apenas nos segredos criptografados do projeto Supabase.
 
 ## Estrutura
 

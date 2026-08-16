@@ -632,12 +632,19 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 /* ============================================================
    TTpost — operação, ranking, estoque e custos livres
    ============================================================ */
+.ttp-head-actions { display: flex; align-items: center; gap: 7px; }
 .ttp-status {
   display: flex; align-items: center; gap: 10px;
   background: #EAF3FF; color: #0060C9;
   border-radius: 14px; padding: 12px 14px; margin-bottom: 14px;
 }
 .ttp-status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--primary); flex: none; }
+.ttp-status.connected { background: #E9F8EF; color: #187A42; }
+.ttp-status.connected .ttp-status-dot { background: #25A55A; }
+.ttp-status.connected small { color: #39835A; }
+.ttp-status.error { background: #FFF0F0; color: #A62A2A; }
+.ttp-status.error .ttp-status-dot { background: var(--danger); }
+.ttp-status.error small { color: #B95656; }
 .ttp-status div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ttp-status b { font-size: 13px; }
 .ttp-status small { font-size: 11px; color: #3979B8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -659,6 +666,8 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
   font-family: inherit; text-align: left; cursor: pointer;
 }
 .ttp-rank-row:active { transform: scale(0.99); }
+.ttp-rank-row.remote-only { cursor: default; }
+.ttp-rank-row.remote-only:active { transform: none; }
 .ttp-rank-row.inactive { opacity: 0.55; }
 .ttp-rank-user { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .ttp-rank-user > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -701,6 +710,8 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 .ttp-bridge-card strong { font-size: 14px; }
 .ttp-bridge-card span { color: var(--warning); font-size: 12px; margin-top: 3px; }
 .ttp-bridge-card p { color: var(--ink-2); font-size: 12px; line-height: 1.45; margin-top: 10px; }
+.ttp-bridge-actions { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }
+.ttp-bridge-actions .btn { margin: 0; }
 .ttp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ttp-sheet-hint { margin: -2px 0 14px; line-height: 1.4; }
 .sheet-scroll { max-height: min(74dvh, 680px); overflow-y: auto; padding: 2px 1px calc(var(--safe-bottom) + 2px); }

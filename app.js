@@ -7,6 +7,90 @@ const $view = document.getElementById('view');
 const $toast = document.getElementById('toast');
 const $backdrop = document.getElementById('sheet-backdrop');
 
+const TTPOST_BRIDGE = (() => {
+  const KEY = 'gestao-op-ttpost-bridge-v1';
+  const URL = 'https://oakylrntjdqnrybxbpvo.supabase.co/functions/v1/ttpost-bridge';
+  let refreshing = false;
+
+  function load() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(KEY) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_err) {
+      return {};
+    }
+  }
+
+  function save(patch) {
+    const next = { ...load(), ...patch };
+    localStorage.setItem(KEY, JSON.stringify(next));
+    return next;
+  }
+
+  function state() {
+    const current = load();
+    return {
+      url: URL,
+      configured: Boolean(current.token),
+      token: current.token || '',
+      installation_id: current.installation_id || null,
+      snapshot: current.snapshot || null,
+      synced_at: current.synced_at || null,
+      fetched_at: current.fetched_at || null,
+      error: current.error || null,
+      refreshing,
+    };
+  }
+
+  function setToken(token) {
+    const value = String(token || '').trim();
+    if (value.length < 24) throw new Error('Cole o token completo do Gestão OP.');
+    save({ token: value, error: null });
+  }
+
+  function disconnect() {
+    localStorage.removeItem(KEY);
+  }
+
+  async function refresh(tokenOverride = '') {
+    if (refreshing) return state();
+    const current = load();
+    const token = String(tokenOverride || current.token || '').trim();
+    if (!token) throw new Error('Configure o token do Gestão OP.');
+    refreshing = true;
+    try {
+      const response = await fetch(URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: 'dashboard' }),
+      });
+      let body = {};
+      try { body = await response.json(); } catch (_err) { /* resposta inválida */ }
+      if (!response.ok) throw new Error(body.error || `Ponte respondeu HTTP ${response.status}.`);
+      const installation = Array.isArray(body.installations) ? body.installations[0] : null;
+      save({
+        token,
+        installation_id: installation?.installation_id || null,
+        snapshot: installation?.snapshot || null,
+        synced_at: installation?.synced_at || null,
+        fetched_at: new Date().toISOString(),
+        error: null,
+      });
+      return state();
+    } catch (err) {
+      save({ error: err.message || 'Não foi possível acessar a ponte.' });
+      throw err;
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  return { state, setToken, disconnect, refresh };
+})();
+
 // Estado da lista (persiste enquanto navega)
 const listaState = { busca: '', status: 'Todas', ordenar: 'recente' };
 const farmListaState = { busca: '', status: 'Todas', ordenar: 'recente' };
@@ -152,6 +236,13 @@ function router() {
 }
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', router);
+setInterval(() => {
+  const bridge = TTPOST_BRIDGE.state();
+  if (!location.hash.startsWith('#/ttpost') || !bridge.configured || bridge.refreshing) return;
+  TTPOST_BRIDGE.refresh()
+    .then(() => renderTtpost(true))
+    .catch(() => renderTtpost(true));
+}, 60000);
 
 /* ============================================================
    COMPONENTES
@@ -955,6 +1046,55 @@ const TTPOST_SCOPE_LABEL = {
 };
 const _numero = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
 
+function ttpostBridgeSheet() {
+  const bridge = TTPOST_BRIDGE.state();
+  openSheet(`
+    <h3>Conectar ao TTpost desktop</h3>
+    <div class="sheet-scroll">
+      <div class="form-group">
+        <label>Token do Gestão OP</label>
+        <input id="ttp-bridge-token" type="password" value="" placeholder="${bridge.configured ? 'Token já configurado — deixe vazio para manter' : 'Cole o token fornecido na configuração'}" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="field-hint ttp-sheet-hint">O token fica somente neste aparelho. Ele não entra no backup nem no código público do site.</div>
+      <div class="form-error" id="ttp-bridge-err"></div>
+      <button class="btn btn-primary" id="ttp-bridge-save">Salvar e testar conexão</button>
+      ${bridge.configured ? '<button class="btn btn-danger-ghost" id="ttp-bridge-disconnect">Desconectar este aparelho</button>' : ''}
+      <button class="btn btn-secondary" id="ttp-bridge-cancel">Cancelar</button>
+    </div>
+  `, sheet => {
+    const saveButton = sheet.querySelector('#ttp-bridge-save');
+    saveButton.addEventListener('click', async () => {
+      const errorElement = sheet.querySelector('#ttp-bridge-err');
+      errorElement.classList.remove('show');
+      saveButton.disabled = true;
+      saveButton.textContent = 'Conectando...';
+      try {
+        const enteredToken = sheet.querySelector('#ttp-bridge-token').value.trim();
+        if (enteredToken) TTPOST_BRIDGE.setToken(enteredToken);
+        else if (!bridge.configured) throw new Error('Cole o token do Gestão OP.');
+        await TTPOST_BRIDGE.refresh();
+        closeSheet();
+        toast('TTpost conectado ✓');
+        renderTtpost(true);
+      } catch (err) {
+        errorElement.textContent = err.message;
+        errorElement.classList.add('show');
+        saveButton.disabled = false;
+        saveButton.textContent = 'Salvar e testar conexão';
+      }
+    });
+    const disconnectButton = sheet.querySelector('#ttp-bridge-disconnect');
+    if (disconnectButton) disconnectButton.addEventListener('click', () => {
+      if (!confirm('Desconectar o TTpost deste aparelho?')) return;
+      TTPOST_BRIDGE.disconnect();
+      closeSheet();
+      toast('Ponte desconectada');
+      renderTtpost(true);
+    });
+    sheet.querySelector('#ttp-bridge-cancel').addEventListener('click', closeSheet);
+  });
+}
+
 function ttpostContaSheet(conta) {
   const vinculadas = DB.listarContasTtpost();
   const disponiveis = DB.listarFarm().filter(f =>
@@ -1127,30 +1267,89 @@ function ttpostEstoqueSheet(item) {
   });
 }
 
-function renderTtpost() {
-  const resumo = DB.resumoTtpost();
-  const ranking = DB.rankingTtpost();
+function ttpostRankingRemoto(snapshot) {
+  const followers = Array.isArray(snapshot?.followers) ? snapshot.followers : [];
+  if (!followers.length) return DB.rankingTtpost();
+  const contasLocais = DB.rankingTtpost();
+  const contasRemotas = Array.isArray(snapshot.accounts) ? snapshot.accounts : [];
+  return followers.map(item => {
+    const profileId = String(item.profile_id || '');
+    const profileName = String(item.profile_name || profileId || 'Perfil');
+    const local = contasLocais.find(c =>
+      (profileId && c.profile_id === profileId)
+      || String(c.nome_perfil || '').toLowerCase() === profileName.toLowerCase()
+    );
+    const remoteAccount = contasRemotas.find(c => c.profile_id === profileId);
+    return {
+      ...(local || {}),
+      id: local?.id || '',
+      nome_perfil: profileName,
+      profile_id: profileId,
+      provider: local?.provider || remoteAccount?.provider || (profileId.startsWith('dolphin:') ? 'dolphin' : 'adspower'),
+      followers: Number(item.followers || 0),
+      media_dia: item.average_per_day == null ? null : Number(item.average_per_day),
+      followers_updated_at: item.captured_at || null,
+      remote_only: !local,
+      active: local?.active !== false,
+      custo_operacional: Number(local?.custo_operacional || 0),
+    };
+  }).sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0));
+}
+
+function renderTtpost(skipRemoteRefresh = false) {
+  const resumoLocal = DB.resumoTtpost();
+  const bridge = TTPOST_BRIDGE.state();
+  const snapshot = bridge.snapshot;
+  const summary = snapshot?.summary || null;
+  const ranking = ttpostRankingRemoto(snapshot);
   const custos = DB.listarCustosTtpost();
-  const estoques = DB.listarEstoquesTtpost();
+  const estoquesRemotos = Array.isArray(snapshot?.presets) ? snapshot.presets.map(p => ({
+    id: `remote-${p.preset_id}`,
+    nome: p.name || 'Preset',
+    pasta: p.folder || '',
+    disponiveis: Number.isFinite(Number(p.videos_available)) ? Number(p.videos_available) : 0,
+    remoto: true,
+  })) : [];
+  const estoques = estoquesRemotos.length ? estoquesRemotos : DB.listarEstoquesTtpost();
+  const resumo = summary ? {
+    ...resumoLocal,
+    contas: Number(summary.accounts_in_presets || 0),
+    ativas: Number(summary.accounts_in_presets || 0),
+    postsHoje: Number(summary.posts_today || 0),
+    falhasHoje: Number(summary.failures_today || 0),
+    aquecimentosHoje: Number(Boolean(summary.browser_warming)) + Number(Boolean(summary.mobile_warming)),
+    videos: Number(summary.videos_available || 0),
+    estoquesBaixos: 0,
+    atualizado_em: bridge.synced_at || snapshot.generated_at || null,
+  } : resumoLocal;
+  const statusClass = bridge.snapshot ? 'connected' : (bridge.error ? 'error' : 'pending');
+  const statusTitle = bridge.snapshot ? 'Conectado ao TTpost desktop'
+    : (bridge.configured ? 'Aguardando dados do TTpost' : 'Ponte online não conectada');
+  const statusDetail = bridge.error ? bridge.error
+    : (resumo.atualizado_em ? `Atualizado ${fmtDataHora(resumo.atualizado_em)}`
+    : 'Configure o token para receber os dados automaticamente');
 
   $view.innerHTML = `
     <div class="page-head">
       <div class="page-head-row">
         <div><h1>TTpost</h1><div class="subtitle">Operação, crescimento e custos</div></div>
-        <button class="btn-small" id="ttp-add-account">+ Conta</button>
+        <div class="ttp-head-actions">
+          <button class="btn-small" id="ttp-config-bridge">Conexão</button>
+          <button class="btn-small" id="ttp-add-account">+ Conta</button>
+        </div>
       </div>
     </div>
 
-    <div class="ttp-status">
+    <div class="ttp-status ${statusClass}">
       <span class="ttp-status-dot"></span>
-      <div><b>Dados deste aparelho</b><small>${resumo.atualizado_em ? `Atualizado ${fmtDataHora(resumo.atualizado_em)}` : 'Aguardando o primeiro cadastro'}</small></div>
+      <div><b>${esc(statusTitle)}</b><small>${esc(statusDetail)}</small></div>
     </div>
 
     <div class="stats-grid ttp-stats">
-      <div class="stat"><div class="label">Contas ativas</div><div class="value">${resumo.ativas}</div><div class="sub">de ${resumo.contas} vinculadas</div></div>
+      <div class="stat"><div class="label">Contas ativas</div><div class="value">${resumo.ativas}</div><div class="sub">${snapshot ? 'nos Presets do PC' : `de ${resumo.contas} vinculadas`}</div></div>
       <div class="stat"><div class="label">Posts hoje</div><div class="value">${resumo.postsHoje}</div><div class="sub">${resumo.falhasHoje} falha(s)</div></div>
-      <div class="stat"><div class="label">Aquecimentos hoje</div><div class="value">${resumo.aquecimentosHoje}</div></div>
-      <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${resumo.estoquesBaixos} estoque(s) baixo(s)</div></div>
+      <div class="stat"><div class="label">${snapshot ? 'Aquecendo agora' : 'Aquecimentos hoje'}</div><div class="value">${resumo.aquecimentosHoje}</div></div>
+      <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${snapshot ? 'nas pastas dos Presets' : `${resumo.estoquesBaixos} estoque(s) baixo(s)`}</div></div>
     </div>
 
     <div class="section-row"><h2>Ranking de seguidores</h2></div>
@@ -1161,20 +1360,24 @@ function renderTtpost() {
         const media = c.media_dia == null ? '—' : `${c.media_dia >= 0 ? '+' : ''}${_numero.format(c.media_dia)}`;
         const meta = Number(c.follower_goal || 0);
         const pct = meta > 0 ? Math.min(100, Number(c.followers || 0) / meta * 100) : 0;
-        return `<button class="ttp-rank-row ${c.active === false ? 'inactive' : ''}" data-ttp-account="${c.id}">
+        const tag = c.id ? 'button' : 'div';
+        const accountAttr = c.id ? ` data-ttp-account="${c.id}"` : '';
+        return `<${tag} class="ttp-rank-row ${c.active === false ? 'inactive' : ''} ${c.remote_only ? 'remote-only' : ''}"${accountAttr}>
           <span class="ttp-rank-user"><b class="ttp-position">#${i + 1}</b><span><strong>${esc(nome)}</strong><small>${TTPOST_SCOPE_LABEL[c.provider] || c.provider} · custo op. ${fmtBRL(c.custo_operacional)}</small></span></span>
           <span class="ttp-followers">${_numero.format(c.followers)}</span>
           <span class="ttp-average ${c.media_dia > 0 ? 'pos' : c.media_dia < 0 ? 'neg' : ''}">${media}</span>
           ${meta > 0 ? `<span class="ttp-goal"><span style="--pct:${pct}%"></span><small>Meta ${_numero.format(meta)} · ${pct.toFixed(0)}%</small></span>` : '<span class="ttp-goal empty-goal"><small>Sem meta</small></span>'}
-        </button>`;
-      }).join('') : `<div class="card empty ttp-empty"><p>Nenhuma conta vinculada.<br>Toque em <strong>+ Conta</strong> para montar o ranking.</p></div>`}
+        </${tag}>`;
+      }).join('') : `<div class="card empty ttp-empty"><p>${bridge.configured ? 'O TTpost ainda não enviou seguidores.' : 'Conecte a ponte ou toque em <strong>+ Conta</strong> para montar o ranking.'}</p></div>`}
     </div>
 
     <div class="section-row"><h2>Estoque de vídeos</h2><button class="sec-link" id="ttp-add-stock">+ Adicionar</button></div>
     <div class="ttp-stock-list">
       ${estoques.length ? estoques.map(e => {
-        const baixo = Number(e.disponiveis) <= Number(e.minimo);
-        return `<button class="ttp-stock-row" data-ttp-stock="${e.id}"><span><strong>${esc(e.nome)}</strong><small>${esc(e.pasta) || 'Pasta ainda não informada'}</small></span><b class="${baixo ? 'neg' : ''}">${e.disponiveis}</b></button>`;
+        const baixo = !e.remoto && Number(e.disponiveis) <= Number(e.minimo);
+        const tag = e.remoto ? 'div' : 'button';
+        const stockAttr = e.remoto ? '' : ` data-ttp-stock="${e.id}"`;
+        return `<${tag} class="ttp-stock-row"${stockAttr}><span><strong>${esc(e.nome)}</strong><small>${esc(e.pasta) || 'Pasta ainda não informada'}</small></span><b class="${baixo ? 'neg' : ''}">${e.disponiveis}</b></${tag}>`;
       }).join('') : '<div class="card ttp-compact-empty">Adicione as pastas para acompanhar quantos vídeos ainda restam.</div>'}
     </div>
 
@@ -1191,11 +1394,17 @@ function renderTtpost() {
 
     <div class="section-row"><h2>Central remota</h2></div>
     <div class="card ttp-bridge-card">
-      <div><strong>Ponte online ainda não conectada</strong><span>${resumo.comandosPendentes} comando(s) aguardando envio</span></div>
-      <p>A venda de uma conta já a marca como inativa e prepara sua retirada da automação. A execução no PC será liberada quando a ponte segura for configurada.</p>
+      <div><strong>${esc(statusTitle)}</strong><span>${bridge.snapshot ? 'Sincronização automática disponível' : `${resumo.comandosPendentes} comando(s) aguardando envio`}</span></div>
+      <p>${bridge.snapshot ? 'Os seguidores, posts e vídeos vêm diretamente do banco do TTpost no computador.' : 'Configure o token seguro uma vez neste aparelho para receber o ranking automaticamente.'}</p>
+      <div class="ttp-bridge-actions">
+        ${bridge.configured ? '<button class="btn btn-secondary" id="ttp-refresh-bridge">Atualizar agora</button>' : ''}
+        <button class="btn btn-secondary" id="ttp-open-bridge">${bridge.configured ? 'Configurar conexão' : 'Conectar Supabase'}</button>
+      </div>
     </div>
   `;
 
+  document.getElementById('ttp-config-bridge').addEventListener('click', ttpostBridgeSheet);
+  document.getElementById('ttp-open-bridge').addEventListener('click', ttpostBridgeSheet);
   document.getElementById('ttp-add-account').addEventListener('click', () => ttpostContaSheet(null));
   document.getElementById('ttp-add-cost').addEventListener('click', () => ttpostCustoSheet(null));
   document.getElementById('ttp-add-stock').addEventListener('click', () => ttpostEstoqueSheet(null));
@@ -1208,6 +1417,24 @@ function renderTtpost() {
   document.querySelectorAll('[data-ttp-stock]').forEach(btn => btn.addEventListener('click', () => {
     ttpostEstoqueSheet(DB.listarEstoquesTtpost().find(e => e.id === btn.dataset.ttpStock));
   }));
+  const refreshButton = document.getElementById('ttp-refresh-bridge');
+  if (refreshButton) refreshButton.addEventListener('click', async () => {
+    refreshButton.disabled = true;
+    refreshButton.textContent = 'Atualizando...';
+    try {
+      await TTPOST_BRIDGE.refresh();
+      toast('Dados atualizados ✓');
+    } catch (err) {
+      toast(err.message);
+    }
+    renderTtpost(true);
+  });
+
+  if (!skipRemoteRefresh && bridge.configured && !bridge.refreshing) {
+    TTPOST_BRIDGE.refresh()
+      .then(() => { if (location.hash.startsWith('#/ttpost')) renderTtpost(true); })
+      .catch(() => { if (location.hash.startsWith('#/ttpost')) renderTtpost(true); });
+  }
 }
 
 /* ============================================================

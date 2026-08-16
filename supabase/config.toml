@@ -1,0 +1,4 @@
+project_id = "oakylrntjdqnrybxbpvo"
+
+[functions.ttpost-bridge]
+verify_jwt = false
