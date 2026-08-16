@@ -123,6 +123,7 @@ function router() {
   else if (parts[0] === 'contas') renderLista();
   else if (parts[0] === 'nova') renderCadastro();
   else if (parts[0] === 'backup') renderBackup();
+  else if (parts[0] === 'ttpost') renderTtpost();
   else if (parts[0] === 'conta' && parts[1]) renderDetalhes(parts[1]);
   else if (parts[0] === 'venda' && parts[1]) renderVenda(parts[1]);
   else if (parts[0] === 'editar' && parts[1]) renderEditarConta(parts[1]);
@@ -139,10 +140,11 @@ function router() {
   else if (parts[0] === 'emails') renderEmails();
   else renderDashboard();
 
-  // Tab ativa (barra enxuta: Início · Emails · Backup)
+  // Tab ativa (barra enxuta: Início · Emails · TTpost · Backup)
   const tab = (hash === '#/' || hash === '#') ? 'dashboard'
     : (parts[0] === 'emails' ? 'emails'
-    : (parts[0] === 'backup' ? 'backup' : ''));
+    : (parts[0] === 'ttpost' ? 'ttpost'
+    : (parts[0] === 'backup' ? 'backup' : '')));
   document.querySelectorAll('.tab').forEach(t =>
     t.classList.toggle('active', t.dataset.tab === tab));
 
@@ -938,6 +940,277 @@ function renderVenda(id) {
 }
 
 /* ============================================================
+   TTPOST  (#/ttpost)
+   ============================================================ */
+const TTPOST_BASE_LABEL = {
+  mensal_compartilhado: 'Mensal compartilhado',
+  mensal_por_conta: 'Mensal por conta',
+  por_postagem: 'Por postagem publicada',
+  por_hora_aquecimento: 'Por hora de aquecimento',
+  por_conta_dia: 'Por conta por dia',
+  fixo_por_conta: 'Fixo por conta',
+};
+const TTPOST_SCOPE_LABEL = {
+  todos: 'Todos', adspower: 'AdsPower', dolphin: 'Dolphin', mobile: 'Celular',
+};
+const _numero = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+
+function ttpostContaSheet(conta) {
+  const vinculadas = DB.listarContasTtpost();
+  const disponiveis = DB.listarFarm().filter(f =>
+    f.id === conta?.farm_id || (f.status !== 'Vendida' && !vinculadas.some(c => c.farm_id === f.id))
+  );
+  if (!disponiveis.length) {
+    toast('Cadastre uma conta no Farm primeiro');
+    return;
+  }
+  const atual = conta || {};
+  openSheet(`
+    <h3>${conta ? 'Editar conta TTpost' : 'Vincular conta ao TTpost'}</h3>
+    <div class="sheet-scroll">
+      <div class="form-group">
+        <label>Conta do Farm</label>
+        <div class="select-wrap"><select id="ttp-farm">
+          ${disponiveis.map(f => `<option value="${f.id}" ${f.id === atual.farm_id ? 'selected' : ''}>@${esc(f.username.replace(/^@/, ''))}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="form-group">
+        <label>Nome do perfil no multilogin</label>
+        <input id="ttp-nome" value="${esc(atual.nome_perfil || '')}" placeholder="Ex.: garthhwbg9z" autocapitalize="none">
+      </div>
+      <div class="form-group">
+        <label>Onde a conta roda</label>
+        <div class="select-wrap"><select id="ttp-provider">
+          ${[['adspower','AdsPower'],['dolphin','Dolphin'],['mobile','Celular']].map(([v,l]) => `<option value="${v}" ${v === (atual.provider || 'adspower') ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="form-group">
+        <label>ID do perfil ou serial do celular</label>
+        <input id="ttp-profile" value="${esc(atual.profile_id || atual.device_serial || '')}" autocapitalize="none">
+      </div>
+      <div class="ttp-form-grid">
+        <div class="form-group"><label>Seguidores</label><input id="ttp-followers" type="number" inputmode="numeric" min="0" value="${Number(atual.followers || 0)}"></div>
+        <div class="form-group"><label>Meta</label><input id="ttp-goal" type="number" inputmode="numeric" min="0" value="${Number(atual.follower_goal || 0)}"></div>
+      </div>
+      <div class="ttp-form-grid">
+        <div class="form-group"><label>Posts concluídos</label><input id="ttp-posts" type="number" inputmode="numeric" min="0" value="${Number(atual.posts_success || 0)}"></div>
+        <div class="form-group"><label>Falhas</label><input id="ttp-fails" type="number" inputmode="numeric" min="0" value="${Number(atual.posts_failed || 0)}"></div>
+      </div>
+      <div class="ttp-form-grid">
+        <div class="form-group"><label>Min. aquecidos</label><input id="ttp-warmup" type="number" inputmode="numeric" min="0" value="${Number(atual.warmup_minutes_total || 0)}"></div>
+        <div class="form-group"><label>Vídeos usados</label><input id="ttp-used" type="number" inputmode="numeric" min="0" value="${Number(atual.videos_used || 0)}"></div>
+      </div>
+      <div class="ttp-form-grid">
+        <div class="form-group"><label>Posts hoje</label><input id="ttp-posts-today" type="number" inputmode="numeric" min="0" value="${Number(atual.posts_today || 0)}"></div>
+        <div class="form-group"><label>Falhas hoje</label><input id="ttp-fails-today" type="number" inputmode="numeric" min="0" value="${Number(atual.failures_today || 0)}"></div>
+      </div>
+      <div class="ttp-form-grid">
+        <div class="form-group"><label>Aquecimentos hoje</label><input id="ttp-warmups-today" type="number" inputmode="numeric" min="0" value="${Number(atual.warmups_today || 0)}"></div>
+        <div class="form-group"><label>Situação</label><div class="select-wrap"><select id="ttp-active"><option value="1" ${atual.active !== false ? 'selected' : ''}>Ativa</option><option value="0" ${atual.active === false ? 'selected' : ''}>Inativa</option></select></div></div>
+      </div>
+      <div class="field-hint ttp-sheet-hint">Seguidores, postagens e aquecimento serão preenchidos automaticamente quando a ponte online for conectada. Por enquanto você pode ajustar manualmente.</div>
+      <div class="form-error" id="ttp-conta-err"></div>
+      <button class="btn btn-primary" id="ttp-save-account">Salvar</button>
+      ${conta ? '<button class="btn btn-danger-ghost" id="ttp-delete-account">Remover vínculo</button>' : ''}
+      <button class="btn btn-secondary" id="ttp-cancel-account">Cancelar</button>
+    </div>
+  `, sheet => {
+    sheet.querySelector('#ttp-save-account').addEventListener('click', () => {
+      try {
+        const provider = sheet.querySelector('#ttp-provider').value;
+        const identificador = sheet.querySelector('#ttp-profile').value;
+        DB.salvarContaTtpost({
+          id: conta?.id,
+          farm_id: sheet.querySelector('#ttp-farm').value,
+          nome_perfil: sheet.querySelector('#ttp-nome').value,
+          provider,
+          profile_id: provider === 'mobile' ? '' : identificador,
+          device_serial: provider === 'mobile' ? identificador : '',
+          followers: sheet.querySelector('#ttp-followers').value,
+          follower_goal: sheet.querySelector('#ttp-goal').value,
+          posts_success: sheet.querySelector('#ttp-posts').value,
+          posts_failed: sheet.querySelector('#ttp-fails').value,
+          warmup_minutes_total: sheet.querySelector('#ttp-warmup').value,
+          videos_used: sheet.querySelector('#ttp-used').value,
+          posts_today: sheet.querySelector('#ttp-posts-today').value,
+          failures_today: sheet.querySelector('#ttp-fails-today').value,
+          warmups_today: sheet.querySelector('#ttp-warmups-today').value,
+          active: sheet.querySelector('#ttp-active').value === '1',
+        });
+        closeSheet(); toast('Conta TTpost salva ✓'); renderTtpost();
+      } catch (err) {
+        const el = sheet.querySelector('#ttp-conta-err');
+        el.textContent = err.message; el.classList.add('show');
+      }
+    });
+    const del = sheet.querySelector('#ttp-delete-account');
+    if (del) del.addEventListener('click', () => {
+      if (!confirm('Remover este vínculo do TTpost?')) return;
+      DB.excluirContaTtpost(conta.id); closeSheet(); toast('Vínculo removido'); renderTtpost();
+    });
+    sheet.querySelector('#ttp-cancel-account').addEventListener('click', closeSheet);
+  });
+}
+
+function ttpostCustoSheet(custo) {
+  const atual = custo || {};
+  openSheet(`
+    <h3>${custo ? 'Editar custo' : 'Novo custo operacional'}</h3>
+    <div class="form-group"><label>Nome do custo</label><input id="ttp-cost-name" value="${esc(atual.nome || '')}" placeholder="Ex.: Dolphin, energia, edição"></div>
+    <div class="form-group"><label>Valor (R$)</label><input id="ttp-cost-value" type="number" inputmode="decimal" step="0.01" min="0" value="${atual.valor != null ? atual.valor : ''}"></div>
+    <div class="form-group"><label>Como calcular</label><div class="select-wrap"><select id="ttp-cost-base">
+      ${Object.entries(TTPOST_BASE_LABEL).map(([v,l]) => `<option value="${v}" ${v === (atual.base || 'mensal_por_conta') ? 'selected' : ''}>${l}</option>`).join('')}
+    </select></div></div>
+    <div class="form-group"><label>Aplicar em</label><div class="select-wrap"><select id="ttp-cost-scope">
+      ${Object.entries(TTPOST_SCOPE_LABEL).map(([v,l]) => `<option value="${v}" ${v === (atual.escopo || 'todos') ? 'selected' : ''}>${l}</option>`).join('')}
+    </select></div></div>
+    <div class="field-hint ttp-sheet-hint">Exemplo: um custo mensal compartilhado é dividido entre as contas ativas. Um custo por postagem usa apenas publicações concluídas.</div>
+    <div class="form-error" id="ttp-cost-err"></div>
+    <button class="btn btn-primary" id="ttp-save-cost">Salvar custo</button>
+    ${custo ? '<button class="btn btn-danger-ghost" id="ttp-delete-cost">Excluir custo</button>' : ''}
+    <button class="btn btn-secondary" id="ttp-cancel-cost">Cancelar</button>
+  `, sheet => {
+    sheet.querySelector('#ttp-save-cost').addEventListener('click', () => {
+      try {
+        DB.salvarCustoTtpost({
+          id: custo?.id, nome: sheet.querySelector('#ttp-cost-name').value,
+          valor: sheet.querySelector('#ttp-cost-value').value,
+          base: sheet.querySelector('#ttp-cost-base').value,
+          escopo: sheet.querySelector('#ttp-cost-scope').value,
+        });
+        closeSheet(); toast('Custo salvo ✓'); renderTtpost();
+      } catch (err) {
+        const el = sheet.querySelector('#ttp-cost-err'); el.textContent = err.message; el.classList.add('show');
+      }
+    });
+    const del = sheet.querySelector('#ttp-delete-cost');
+    if (del) del.addEventListener('click', () => {
+      if (!confirm(`Excluir o custo "${custo.nome}"?`)) return;
+      DB.excluirCustoTtpost(custo.id); closeSheet(); toast('Custo excluído'); renderTtpost();
+    });
+    sheet.querySelector('#ttp-cancel-cost').addEventListener('click', closeSheet);
+  });
+}
+
+function ttpostEstoqueSheet(item) {
+  const atual = item || {};
+  openSheet(`
+    <h3>${item ? 'Editar estoque' : 'Novo estoque de vídeos'}</h3>
+    <div class="form-group"><label>Nome</label><input id="ttp-stock-name" value="${esc(atual.nome || '')}" placeholder="Ex.: Vídeos produto A"></div>
+    <div class="form-group"><label>Pasta</label><input id="ttp-stock-folder" value="${esc(atual.pasta || '')}" placeholder="C:\\Videos\\Produto A" autocapitalize="none"></div>
+    <div class="ttp-form-grid">
+      <div class="form-group"><label>Disponíveis</label><input id="ttp-stock-count" type="number" inputmode="numeric" min="0" value="${Number(atual.disponiveis || 0)}"></div>
+      <div class="form-group"><label>Alerta abaixo de</label><input id="ttp-stock-min" type="number" inputmode="numeric" min="0" value="${Number(atual.minimo || 0)}"></div>
+    </div>
+    <div class="form-error" id="ttp-stock-err"></div>
+    <button class="btn btn-primary" id="ttp-save-stock">Salvar estoque</button>
+    ${item ? '<button class="btn btn-danger-ghost" id="ttp-delete-stock">Excluir estoque</button>' : ''}
+    <button class="btn btn-secondary" id="ttp-cancel-stock">Cancelar</button>
+  `, sheet => {
+    sheet.querySelector('#ttp-save-stock').addEventListener('click', () => {
+      try {
+        DB.salvarEstoqueTtpost({ id: item?.id, nome: sheet.querySelector('#ttp-stock-name').value,
+          pasta: sheet.querySelector('#ttp-stock-folder').value,
+          disponiveis: sheet.querySelector('#ttp-stock-count').value,
+          minimo: sheet.querySelector('#ttp-stock-min').value });
+        closeSheet(); toast('Estoque salvo ✓'); renderTtpost();
+      } catch (err) {
+        const el = sheet.querySelector('#ttp-stock-err'); el.textContent = err.message; el.classList.add('show');
+      }
+    });
+    const del = sheet.querySelector('#ttp-delete-stock');
+    if (del) del.addEventListener('click', () => {
+      if (!confirm(`Excluir o estoque "${item.nome}"?`)) return;
+      DB.excluirEstoqueTtpost(item.id); closeSheet(); toast('Estoque excluído'); renderTtpost();
+    });
+    sheet.querySelector('#ttp-cancel-stock').addEventListener('click', closeSheet);
+  });
+}
+
+function renderTtpost() {
+  const resumo = DB.resumoTtpost();
+  const ranking = DB.rankingTtpost();
+  const custos = DB.listarCustosTtpost();
+  const estoques = DB.listarEstoquesTtpost();
+
+  $view.innerHTML = `
+    <div class="page-head">
+      <div class="page-head-row">
+        <div><h1>TTpost</h1><div class="subtitle">Operação, crescimento e custos</div></div>
+        <button class="btn-small" id="ttp-add-account">+ Conta</button>
+      </div>
+    </div>
+
+    <div class="ttp-status">
+      <span class="ttp-status-dot"></span>
+      <div><b>Dados deste aparelho</b><small>${resumo.atualizado_em ? `Atualizado ${fmtDataHora(resumo.atualizado_em)}` : 'Aguardando o primeiro cadastro'}</small></div>
+    </div>
+
+    <div class="stats-grid ttp-stats">
+      <div class="stat"><div class="label">Contas ativas</div><div class="value">${resumo.ativas}</div><div class="sub">de ${resumo.contas} vinculadas</div></div>
+      <div class="stat"><div class="label">Posts hoje</div><div class="value">${resumo.postsHoje}</div><div class="sub">${resumo.falhasHoje} falha(s)</div></div>
+      <div class="stat"><div class="label">Aquecimentos hoje</div><div class="value">${resumo.aquecimentosHoje}</div></div>
+      <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${resumo.estoquesBaixos} estoque(s) baixo(s)</div></div>
+    </div>
+
+    <div class="section-row"><h2>Ranking de seguidores</h2></div>
+    <div class="ttp-ranking-head"><span>User</span><span>Qtd. seg.</span><span>Média seg./d</span></div>
+    <div class="ttp-ranking">
+      ${ranking.length ? ranking.map((c, i) => {
+        const nome = c.nome_perfil || c.farm?.username || 'Perfil';
+        const media = c.media_dia == null ? '—' : `${c.media_dia >= 0 ? '+' : ''}${_numero.format(c.media_dia)}`;
+        const meta = Number(c.follower_goal || 0);
+        const pct = meta > 0 ? Math.min(100, Number(c.followers || 0) / meta * 100) : 0;
+        return `<button class="ttp-rank-row ${c.active === false ? 'inactive' : ''}" data-ttp-account="${c.id}">
+          <span class="ttp-rank-user"><b class="ttp-position">#${i + 1}</b><span><strong>${esc(nome)}</strong><small>${TTPOST_SCOPE_LABEL[c.provider] || c.provider} · custo op. ${fmtBRL(c.custo_operacional)}</small></span></span>
+          <span class="ttp-followers">${_numero.format(c.followers)}</span>
+          <span class="ttp-average ${c.media_dia > 0 ? 'pos' : c.media_dia < 0 ? 'neg' : ''}">${media}</span>
+          ${meta > 0 ? `<span class="ttp-goal"><span style="--pct:${pct}%"></span><small>Meta ${_numero.format(meta)} · ${pct.toFixed(0)}%</small></span>` : '<span class="ttp-goal empty-goal"><small>Sem meta</small></span>'}
+        </button>`;
+      }).join('') : `<div class="card empty ttp-empty"><p>Nenhuma conta vinculada.<br>Toque em <strong>+ Conta</strong> para montar o ranking.</p></div>`}
+    </div>
+
+    <div class="section-row"><h2>Estoque de vídeos</h2><button class="sec-link" id="ttp-add-stock">+ Adicionar</button></div>
+    <div class="ttp-stock-list">
+      ${estoques.length ? estoques.map(e => {
+        const baixo = Number(e.disponiveis) <= Number(e.minimo);
+        return `<button class="ttp-stock-row" data-ttp-stock="${e.id}"><span><strong>${esc(e.nome)}</strong><small>${esc(e.pasta) || 'Pasta ainda não informada'}</small></span><b class="${baixo ? 'neg' : ''}">${e.disponiveis}</b></button>`;
+      }).join('') : '<div class="card ttp-compact-empty">Adicione as pastas para acompanhar quantos vídeos ainda restam.</div>'}
+    </div>
+
+    <div class="section-row"><h2>Custos operacionais</h2><button class="sec-link" id="ttp-add-cost">+ Adicionar</button></div>
+    <div class="card ttp-cost-summary">
+      <span>Custo operacional calculado</span><b>${fmtBRL(resumo.custoOperacional)}</b>
+      <small>Aquisição e proxies continuam separados no Farm.</small>
+    </div>
+    <div class="ttp-cost-list">
+      ${custos.length ? custos.map(c => `<button class="ttp-cost-row" data-ttp-cost="${c.id}">
+        <span><strong>${esc(c.nome)}</strong><small>${TTPOST_BASE_LABEL[c.base]} · ${TTPOST_SCOPE_LABEL[c.escopo]}</small></span><b>${fmtBRL(c.valor)}</b>
+      </button>`).join('') : '<div class="card ttp-compact-empty">Crie custos com o nome e o valor que você quiser. A base escolhida define o cálculo automático.</div>'}
+    </div>
+
+    <div class="section-row"><h2>Central remota</h2></div>
+    <div class="card ttp-bridge-card">
+      <div><strong>Ponte online ainda não conectada</strong><span>${resumo.comandosPendentes} comando(s) aguardando envio</span></div>
+      <p>A venda de uma conta já a marca como inativa e prepara sua retirada da automação. A execução no PC será liberada quando a ponte segura for configurada.</p>
+    </div>
+  `;
+
+  document.getElementById('ttp-add-account').addEventListener('click', () => ttpostContaSheet(null));
+  document.getElementById('ttp-add-cost').addEventListener('click', () => ttpostCustoSheet(null));
+  document.getElementById('ttp-add-stock').addEventListener('click', () => ttpostEstoqueSheet(null));
+  document.querySelectorAll('[data-ttp-account]').forEach(btn => btn.addEventListener('click', () => {
+    ttpostContaSheet(DB.listarContasTtpost().find(c => c.id === btn.dataset.ttpAccount));
+  }));
+  document.querySelectorAll('[data-ttp-cost]').forEach(btn => btn.addEventListener('click', () => {
+    ttpostCustoSheet(DB.listarCustosTtpost().find(c => c.id === btn.dataset.ttpCost));
+  }));
+  document.querySelectorAll('[data-ttp-stock]').forEach(btn => btn.addEventListener('click', () => {
+    ttpostEstoqueSheet(DB.listarEstoquesTtpost().find(e => e.id === btn.dataset.ttpStock));
+  }));
+}
+
+/* ============================================================
    BACKUP  (#/backup)
    ============================================================ */
 function renderBackup() {
@@ -958,6 +1231,8 @@ function renderBackup() {
       <div class="detail-row"><span class="k">Contas</span><span class="v">${t.contas}</span></div>
       <div class="detail-row"><span class="k">Contas em farm</span><span class="v">${t.farm}</span></div>
       <div class="detail-row"><span class="k">Meses de ofertas</span><span class="v">${t.ofertas}</span></div>
+      <div class="detail-row"><span class="k">Contas no TTpost</span><span class="v">${t.ttpostContas}</span></div>
+      <div class="detail-row"><span class="k">Custos personalizados</span><span class="v">${t.ttpostCustos}</span></div>
       <div class="detail-row"><span class="k">Eventos de histórico</span><span class="v">${t.eventos + t.farmEventos + t.ofertasEventos}</span></div>
       <div class="detail-row"><span class="k">Último backup</span><span class="v">${ultimo ? fmtDataHora(ultimo) : 'Nunca'}</span></div>
     </div>
@@ -1399,6 +1674,7 @@ function renderFarmDetalhes(id) {
         const n = DB.contasDoRecurso(rid);
         return `<div class="detail-row"><span class="k">${esc(r.nome)} <span class="k-sub">(÷${n})</span></span><span class="v">${fmtBRL(DB.custoRecursoPorConta(rid))}</span></div>`;
       }).join('')}
+      <div class="detail-row"><span class="k">Operação TTpost</span><span class="v">${fmtBRL(DB.custoOperacionalTtpostFarm(c.id))}</span></div>
       <div class="detail-row"><span class="k">Custo total</span><span class="v" style="font-weight:700;">${fmtBRL(c.custo)}</span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>

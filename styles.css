@@ -628,3 +628,86 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
   display: flex; align-items: center; justify-content: center;
 }
 .meta-edit svg { width: 14px; height: 14px; }
+
+/* ============================================================
+   TTpost — operação, ranking, estoque e custos livres
+   ============================================================ */
+.ttp-status {
+  display: flex; align-items: center; gap: 10px;
+  background: #EAF3FF; color: #0060C9;
+  border-radius: 14px; padding: 12px 14px; margin-bottom: 14px;
+}
+.ttp-status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--primary); flex: none; }
+.ttp-status div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ttp-status b { font-size: 13px; }
+.ttp-status small { font-size: 11px; color: #3979B8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttp-stats { margin-bottom: 2px; }
+.ttp-stats .value { font-size: 28px; }
+.ttp-stats .value.neg { color: var(--danger); }
+
+.ttp-ranking-head {
+  display: grid; grid-template-columns: minmax(0, 1fr) 70px 78px; gap: 8px;
+  padding: 0 14px 7px; color: var(--ink-3); font-size: 10px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.2px;
+}
+.ttp-ranking-head span:nth-child(n+2) { text-align: right; }
+.ttp-ranking { display: flex; flex-direction: column; gap: 9px; }
+.ttp-rank-row {
+  width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 70px 78px; gap: 8px;
+  align-items: center; padding: 14px; border: none; border-radius: var(--radius);
+  background: var(--card); color: var(--ink); box-shadow: var(--shadow-card);
+  font-family: inherit; text-align: left; cursor: pointer;
+}
+.ttp-rank-row:active { transform: scale(0.99); }
+.ttp-rank-row.inactive { opacity: 0.55; }
+.ttp-rank-user { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.ttp-rank-user > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ttp-rank-user strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttp-rank-user small { font-size: 9px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttp-position {
+  width: 28px; height: 28px; border-radius: 9px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: #EAF3FF; color: var(--primary); font-size: 11px;
+}
+.ttp-followers, .ttp-average { text-align: right; font-weight: 800; font-size: 14px; }
+.ttp-average { font-size: 13px; }
+.ttp-average.pos { color: var(--success-ink); }
+.ttp-average.neg, .ttp-stock-row b.neg { color: var(--danger); }
+.ttp-goal { grid-column: 1 / -1; position: relative; height: 18px; background: #EFEFF1; border-radius: 100px; overflow: hidden; }
+.ttp-goal > span { position: absolute; inset: 0 auto 0 0; width: var(--pct); background: #B9DCF9; border-radius: 100px; }
+.ttp-goal small { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #225F99; font-weight: 700; }
+.ttp-goal.empty-goal { background: transparent; height: 12px; }
+.ttp-goal.empty-goal small { color: var(--ink-3); justify-content: flex-start; }
+.ttp-empty { margin-top: 0; }
+
+.ttp-stock-list, .ttp-cost-list { display: flex; flex-direction: column; gap: 9px; }
+.ttp-stock-row, .ttp-cost-row {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  padding: 14px 16px; border: none; border-radius: 14px;
+  background: var(--card); color: var(--ink); box-shadow: var(--shadow-card);
+  font-family: inherit; text-align: left; cursor: pointer;
+}
+.ttp-stock-row > span, .ttp-cost-row > span { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.ttp-stock-row strong, .ttp-cost-row strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttp-stock-row small, .ttp-cost-row small { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ttp-stock-row b, .ttp-cost-row b { flex: none; font-size: 16px; }
+.ttp-compact-empty { color: var(--ink-2); font-size: 13px; line-height: 1.45; padding: 16px; }
+.ttp-cost-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 9px; }
+.ttp-cost-summary > span { flex: 1; font-size: 13px; color: var(--ink-2); }
+.ttp-cost-summary > b { font-size: 22px; }
+.ttp-cost-summary > small { width: 100%; font-size: 10px; color: var(--ink-3); }
+
+.ttp-bridge-card strong, .ttp-bridge-card span { display: block; }
+.ttp-bridge-card strong { font-size: 14px; }
+.ttp-bridge-card span { color: var(--warning); font-size: 12px; margin-top: 3px; }
+.ttp-bridge-card p { color: var(--ink-2); font-size: 12px; line-height: 1.45; margin-top: 10px; }
+.ttp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ttp-sheet-hint { margin: -2px 0 14px; line-height: 1.4; }
+.sheet-scroll { max-height: min(74dvh, 680px); overflow-y: auto; padding: 2px 1px calc(var(--safe-bottom) + 2px); }
+
+@media (max-width: 370px) {
+  .ttp-ranking-head, .ttp-rank-row { grid-template-columns: minmax(0, 1fr) 62px 68px; gap: 5px; }
+  .ttp-position { width: 24px; height: 24px; }
+  .ttp-rank-user { gap: 5px; }
+  .ttp-rank-user small { display: none; }
+}

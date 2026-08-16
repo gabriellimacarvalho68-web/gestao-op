@@ -15,6 +15,18 @@ const DB = (() => {
   // Categorias sugeridas para lançamentos do Grupo de Ofertas
   const OFERTAS_CATEGORIAS = ['Tráfego Meta', 'Google Ads', 'Ferramentas', 'Comissão', 'Venda diária', 'Outros'];
 
+  // Bases disponíveis para custos livres do TTpost. O nome e o valor são
+  // definidos pelo usuário; a base diz qual contador automático será usado.
+  const TTPOST_CUSTO_BASES = [
+    'mensal_compartilhado',
+    'mensal_por_conta',
+    'por_postagem',
+    'por_hora_aquecimento',
+    'por_conta_dia',
+    'fixo_por_conta',
+  ];
+  const TTPOST_ESCOPOS = ['todos', 'adspower', 'dolphin', 'mobile'];
+
   const MESES_NOME = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
   function uuid() {
@@ -23,6 +35,54 @@ const DB = (() => {
       const r = (Math.random() * 16) | 0;
       return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
     });
+  }
+
+  function ttpostVazio() {
+    return {
+      custos: [],
+      contas: [],
+      estoques: [],
+      comandos: [],
+      eventos: [],
+      atualizado_em: null,
+    };
+  }
+
+  function normalizarTtpost(valor) {
+    const t = valor && typeof valor === 'object' ? valor : ttpostVazio();
+    t.custos = Array.isArray(t.custos) ? t.custos : [];
+    t.contas = Array.isArray(t.contas) ? t.contas : [];
+    t.estoques = Array.isArray(t.estoques) ? t.estoques : [];
+    t.comandos = Array.isArray(t.comandos) ? t.comandos : [];
+    t.eventos = Array.isArray(t.eventos) ? t.eventos : [];
+    t.atualizado_em = t.atualizado_em || null;
+    t.custos.forEach(c => {
+      if (!TTPOST_CUSTO_BASES.includes(c.base)) c.base = 'mensal_por_conta';
+      if (!TTPOST_ESCOPOS.includes(c.escopo)) c.escopo = 'todos';
+      c.valor = Number(c.valor || 0);
+      c.ativo = c.ativo !== false;
+    });
+    t.contas.forEach(c => {
+      if (!TTPOST_ESCOPOS.slice(1).includes(c.provider)) c.provider = 'adspower';
+      c.followers = Number(c.followers || 0);
+      c.follower_goal = Number(c.follower_goal || 0);
+      c.followers_first = c.followers_first == null ? c.followers : Number(c.followers_first || 0);
+      c.warmup_minutes_total = Number(c.warmup_minutes_total || 0);
+      c.posts_success = Number(c.posts_success || 0);
+      c.posts_failed = Number(c.posts_failed || 0);
+      c.videos_used = Number(c.videos_used || 0);
+      c.posts_today = Number(c.posts_today || 0);
+      c.failures_today = Number(c.failures_today || 0);
+      c.warmups_today = Number(c.warmups_today || 0);
+      c.active = c.active !== false;
+      c.rateios_fechados = c.rateios_fechados && typeof c.rateios_fechados === 'object'
+        ? c.rateios_fechados : {};
+    });
+    t.estoques.forEach(e => {
+      e.disponiveis = Number(e.disponiveis || 0);
+      e.minimo = Number(e.minimo || 0);
+    });
+    return t;
   }
 
   function load() {
@@ -40,6 +100,7 @@ const DB = (() => {
         obj.ofertas_historico = obj.ofertas_historico || [];
         obj.ofertas_grupos = obj.ofertas_grupos || [];
         obj.emails = obj.emails || [];
+        obj.ttpost = normalizarTtpost(obj.ttpost);
         obj.meta_anual = obj.meta_anual != null ? obj.meta_anual : 10000;
         // Migração: custo passa a ser custo_proprio + fatias de recursos
         obj.farm.forEach(f => {
@@ -49,7 +110,7 @@ const DB = (() => {
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], meta_anual: 10000 };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
   }
 
   let data = load();
@@ -118,10 +179,83 @@ const DB = (() => {
     return n > 0 ? Number(r.custo_total || 0) / n : 0;
   }
 
-  // Custo total de uma conta = custo próprio + soma das fatias dos recursos
+  // ---- TTpost: vínculos, ranking, estoque e custos operacionais ----
+  function ttpostContaDoFarm(farmId) {
+    return data.ttpost.contas.find(c => c.farm_id === farmId) || null;
+  }
+
+  function ttpostEscopoCombina(custo, conta) {
+    return custo.escopo === 'todos' || custo.escopo === conta.provider;
+  }
+
+  function ttpostDiasCobrados(farm, conta, custo) {
+    const inicioFarm = new Date(farm.data_inicio || farm.criado_em || now()).getTime();
+    const inicioCusto = new Date(custo.criado_em || farm.data_inicio || now()).getTime();
+    const inicio = Math.max(inicioFarm, inicioCusto);
+    const fim = new Date(conta.desativado_em || farm.data_venda || now()).getTime();
+    if (!Number.isFinite(inicio) || !Number.isFinite(fim) || fim < inicio) return 0;
+    // Um custo mensal/diário criado e usado no mesmo dia conta como um dia.
+    return Math.max(1, (fim - inicio) / 86400000);
+  }
+
+  function ttpostDivisorCompartilhado(custo, conta) {
+    const fechado = Number((conta.rateios_fechados || {})[custo.id]);
+    if (fechado > 0) return fechado;
+    const ativas = data.ttpost.contas.filter(c =>
+      c.active !== false && ttpostEscopoCombina(custo, c)
+    ).length;
+    return Math.max(1, ativas);
+  }
+
+  function detalharCustoTtpostFarm(farmId) {
+    const farm = data.farm.find(f => f.id === farmId);
+    const conta = ttpostContaDoFarm(farmId);
+    if (!farm || !conta) return { total: 0, itens: [], dias: 0 };
+    const itens = [];
+    data.ttpost.custos.filter(c => c.ativo !== false && ttpostEscopoCombina(c, conta)).forEach(custo => {
+      const valor = Number(custo.valor || 0);
+      const dias = ttpostDiasCobrados(farm, conta, custo);
+      if (dias <= 0) return;
+      let qtd = 0;
+      let total = 0;
+      if (custo.base === 'mensal_compartilhado') {
+        const divisor = ttpostDivisorCompartilhado(custo, conta);
+        qtd = dias / 30 / divisor;
+        total = valor * qtd;
+      } else if (custo.base === 'mensal_por_conta') {
+        qtd = dias / 30;
+        total = valor * qtd;
+      } else if (custo.base === 'por_postagem') {
+        qtd = Number(conta.posts_success || 0);
+        total = valor * qtd;
+      } else if (custo.base === 'por_hora_aquecimento') {
+        qtd = Number(conta.warmup_minutes_total || 0) / 60;
+        total = valor * qtd;
+      } else if (custo.base === 'por_conta_dia') {
+        qtd = dias;
+        total = valor * qtd;
+      } else if (custo.base === 'fixo_por_conta') {
+        qtd = 1;
+        total = valor;
+      }
+      itens.push({ ...custo, qtd, total });
+    });
+    return {
+      total: itens.reduce((s, i) => s + i.total, 0),
+      itens,
+      dias: itens.length ? ttpostDiasCobrados(farm, conta, itens[0]) : 0,
+    };
+  }
+
+  function custoOperacionalTtpostFarm(farmId) {
+    return detalharCustoTtpostFarm(farmId).total;
+  }
+
+  // Custo total = aquisição + recursos compartilhados + operação do TTpost.
   function custoTotalFarm(f) {
     let total = Number(f.custo_proprio || 0);
     (f.recursos || []).forEach(rid => { total += custoRecursoPorConta(rid); });
+    total += custoOperacionalTtpostFarm(f.id);
     return total;
   }
 
@@ -132,6 +266,204 @@ const DB = (() => {
       f.custo = custoTotalFarm(f);
       f.lucro = calcLucroFarm(f);
     });
+  }
+
+  function listarCustosTtpost() {
+    return [...data.ttpost.custos].sort((a, b) =>
+      String(a.criado_em || '').localeCompare(String(b.criado_em || ''))
+    );
+  }
+
+  function salvarCustoTtpost(campos) {
+    const nome = String(campos.nome || '').trim();
+    const valor = Number(campos.valor);
+    const base = String(campos.base || 'mensal_por_conta');
+    const escopo = String(campos.escopo || 'todos');
+    if (!nome) throw new Error('Dê um nome ao custo.');
+    if (campos.valor === '' || !Number.isFinite(valor) || valor < 0)
+      throw new Error('Informe um valor válido.');
+    if (!TTPOST_CUSTO_BASES.includes(base)) throw new Error('Base de cálculo inválida.');
+    if (!TTPOST_ESCOPOS.includes(escopo)) throw new Error('Aplicação inválida.');
+    let custo = campos.id ? data.ttpost.custos.find(c => c.id === campos.id) : null;
+    if (campos.id && !custo) throw new Error('Custo não encontrado.');
+    if (!custo) {
+      custo = { id: uuid(), criado_em: now() };
+      data.ttpost.custos.push(custo);
+    }
+    Object.assign(custo, { nome, valor, base, escopo, ativo: campos.ativo !== false, atualizado_em: now() });
+    data.ttpost.atualizado_em = now();
+    recalcularCustosFarm();
+    persist();
+    return custo;
+  }
+
+  function excluirCustoTtpost(id) {
+    data.ttpost.custos = data.ttpost.custos.filter(c => c.id !== id);
+    data.ttpost.contas.forEach(c => { delete c.rateios_fechados[id]; });
+    data.ttpost.atualizado_em = now();
+    recalcularCustosFarm();
+    persist();
+  }
+
+  function registrarRateiosFechados(conta) {
+    data.ttpost.custos
+      .filter(c => c.ativo !== false && c.base === 'mensal_compartilhado' && ttpostEscopoCombina(c, conta))
+      .forEach(c => { conta.rateios_fechados[c.id] = ttpostDivisorCompartilhado(c, conta); });
+  }
+
+  function enfileirarComandoTtpost(tipo, conta, motivo) {
+    data.ttpost.comandos.push({
+      id: uuid(), tipo, conta_id: conta.id, farm_id: conta.farm_id,
+      provider: conta.provider, profile_id: conta.profile_id || '',
+      device_serial: conta.device_serial || '', motivo: motivo || '',
+      status: 'pendente', criado_em: now(),
+    });
+  }
+
+  function desativarContaTtpostPorFarm(farmId, motivo, encerradoEm) {
+    const conta = ttpostContaDoFarm(farmId);
+    if (!conta || conta.active === false) return null;
+    registrarRateiosFechados(conta);
+    conta.active = false;
+    conta.desativado_em = encerradoEm || now();
+    conta.atualizado_em = now();
+    enfileirarComandoTtpost('desativar_conta', conta, motivo || 'Conta vendida no Farm');
+    return conta;
+  }
+
+  function listarContasTtpost() {
+    return data.ttpost.contas.map(c => ({ ...c }));
+  }
+
+  function salvarContaTtpost(campos) {
+    const farmId = String(campos.farm_id || '');
+    const farm = data.farm.find(f => f.id === farmId);
+    if (!farm) throw new Error('Escolha uma conta do Farm.');
+    const repetida = data.ttpost.contas.find(c => c.farm_id === farmId && c.id !== campos.id);
+    if (repetida) throw new Error('Esta conta do Farm já está vinculada ao TTpost.');
+    const provider = String(campos.provider || 'adspower');
+    if (!TTPOST_ESCOPOS.slice(1).includes(provider)) throw new Error('Multilogin inválido.');
+    const numero = (v, nome) => {
+      const n = v === '' || v == null ? 0 : Number(v);
+      if (!Number.isFinite(n) || n < 0) throw new Error(`${nome} deve ser zero ou maior.`);
+      return n;
+    };
+    let conta = campos.id ? data.ttpost.contas.find(c => c.id === campos.id) : null;
+    if (campos.id && !conta) throw new Error('Vínculo não encontrado.');
+    const seguidores = numero(campos.followers, 'Seguidores');
+    if (!conta) {
+      conta = {
+        id: uuid(), criado_em: now(), active: true, desativado_em: null,
+        followers_first: seguidores, followers_first_at: now(), rateios_fechados: {},
+      };
+      data.ttpost.contas.push(conta);
+    }
+    const ativo = campos.active !== false;
+    if (conta.active !== false && !ativo) {
+      registrarRateiosFechados(conta);
+      conta.desativado_em = now();
+    } else if (conta.active === false && ativo) {
+      conta.desativado_em = null;
+      conta.rateios_fechados = {};
+    }
+    Object.assign(conta, {
+      farm_id: farmId,
+      nome_perfil: String(campos.nome_perfil || farm.username).trim(),
+      provider,
+      profile_id: String(campos.profile_id || '').trim(),
+      device_serial: String(campos.device_serial || '').trim(),
+      followers: seguidores,
+      follower_goal: numero(campos.follower_goal, 'Meta de seguidores'),
+      warmup_minutes_total: numero(campos.warmup_minutes_total, 'Minutos de aquecimento'),
+      posts_success: numero(campos.posts_success, 'Postagens'),
+      posts_failed: numero(campos.posts_failed, 'Falhas'),
+      videos_used: numero(campos.videos_used, 'Vídeos usados'),
+      posts_today: numero(campos.posts_today, 'Postagens de hoje'),
+      failures_today: numero(campos.failures_today, 'Falhas de hoje'),
+      warmups_today: numero(campos.warmups_today, 'Aquecimentos de hoje'),
+      active: ativo,
+      followers_updated_at: now(),
+      atualizado_em: now(),
+    });
+    data.ttpost.atualizado_em = now();
+    recalcularCustosFarm();
+    persist();
+    return conta;
+  }
+
+  function excluirContaTtpost(id) {
+    const conta = data.ttpost.contas.find(c => c.id === id);
+    if (!conta) return;
+    if (conta.active !== false) enfileirarComandoTtpost('desativar_conta', conta, 'Vínculo removido no Gestão Op');
+    data.ttpost.contas = data.ttpost.contas.filter(c => c.id !== id);
+    data.ttpost.atualizado_em = now();
+    recalcularCustosFarm();
+    persist();
+  }
+
+  function mediaSeguidoresTtpost(conta) {
+    const inicio = new Date(conta.followers_first_at || conta.criado_em || now()).getTime();
+    const fim = new Date(conta.followers_updated_at || now()).getTime();
+    const dias = (fim - inicio) / 86400000;
+    if (!Number.isFinite(dias) || dias < 1) return null;
+    return (Number(conta.followers || 0) - Number(conta.followers_first || 0)) / dias;
+  }
+
+  function rankingTtpost() {
+    return data.ttpost.contas.map(c => {
+      const farm = data.farm.find(f => f.id === c.farm_id) || null;
+      return { ...c, farm, media_dia: mediaSeguidoresTtpost(c), custo_operacional: custoOperacionalTtpostFarm(c.farm_id) };
+    }).sort((a, b) => Number(b.followers || 0) - Number(a.followers || 0));
+  }
+
+  function listarEstoquesTtpost() {
+    return [...data.ttpost.estoques].sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  }
+
+  function salvarEstoqueTtpost(campos) {
+    const nome = String(campos.nome || '').trim();
+    if (!nome) throw new Error('Dê um nome ao estoque.');
+    const disponiveis = Number(campos.disponiveis);
+    const minimo = Number(campos.minimo || 0);
+    if (!Number.isFinite(disponiveis) || disponiveis < 0 || !Number.isFinite(minimo) || minimo < 0)
+      throw new Error('Informe quantidades válidas.');
+    let item = campos.id ? data.ttpost.estoques.find(e => e.id === campos.id) : null;
+    if (campos.id && !item) throw new Error('Estoque não encontrado.');
+    if (!item) {
+      item = { id: uuid(), criado_em: now() };
+      data.ttpost.estoques.push(item);
+    }
+    Object.assign(item, {
+      nome, pasta: String(campos.pasta || '').trim(), disponiveis, minimo,
+      atualizado_em: now(),
+    });
+    data.ttpost.atualizado_em = now();
+    persist();
+    return item;
+  }
+
+  function excluirEstoqueTtpost(id) {
+    data.ttpost.estoques = data.ttpost.estoques.filter(e => e.id !== id);
+    data.ttpost.atualizado_em = now();
+    persist();
+  }
+
+  function resumoTtpost() {
+    const contas = data.ttpost.contas;
+    const estoques = data.ttpost.estoques;
+    return {
+      contas: contas.length,
+      ativas: contas.filter(c => c.active !== false).length,
+      postsHoje: contas.reduce((s, c) => s + Number(c.posts_today || 0), 0),
+      falhasHoje: contas.reduce((s, c) => s + Number(c.failures_today || 0), 0),
+      aquecimentosHoje: contas.reduce((s, c) => s + Number(c.warmups_today || 0), 0),
+      seguidores: contas.reduce((s, c) => s + Number(c.followers || 0), 0),
+      videos: estoques.reduce((s, e) => s + Number(e.disponiveis || 0), 0),
+      estoquesBaixos: estoques.filter(e => Number(e.disponiveis || 0) <= Number(e.minimo || 0)).length,
+      custoOperacional: data.farm.reduce((s, f) => s + custoOperacionalTtpostFarm(f.id), 0),
+      comandosPendentes: data.ttpost.comandos.filter(c => c.status === 'pendente').length,
+      atualizado_em: data.ttpost.atualizado_em,
+    };
   }
 
   function listarRecursosFarm() {
@@ -484,7 +816,6 @@ const DB = (() => {
       throw new Error('Valor da venda é obrigatório.');
 
     f.preco_venda = Number(preco_venda);
-    f.lucro = calcLucroFarm(f);
     f.data_venda = data_venda || now();
     f.atualizado_em = now();
     const anterior = f.status;
@@ -492,6 +823,10 @@ const DB = (() => {
     if (anterior !== 'Vendida') {
       addFarmHistorico(id, 'Estágio alterado para Vendida', `De ${anterior} para Vendida.`);
     }
+    // A venda encerra os custos recorrentes e cria o comando que a ponte do
+    // TTpost consumirá para retirar a conta de presets/aquecimentos futuros.
+    desativarContaTtpostPorFarm(id, 'Conta vendida no Farm', f.data_venda);
+    recalcularCustosFarm();
     let desc = `Venda de ${fmtBRL(f.preco_venda)} — lucro de ${fmtBRL(f.lucro)}.`;
     if (observacoes && observacoes.trim()) desc += ` Obs.: ${observacoes.trim()}`;
     addFarmHistorico(id, 'Venda registrada', desc);
@@ -515,11 +850,18 @@ const DB = (() => {
     if (statusAnterior !== 'Crescendo') {
       addFarmHistorico(id, 'Estágio alterado para Crescendo', `De ${statusAnterior} para Crescendo.`);
     }
+    // Não reativa o TTpost automaticamente: a conta pode já ter sido entregue.
+    recalcularCustosFarm();
     persist();
     return f;
   }
 
   function excluirFarm(id) {
+    const contaTtpost = ttpostContaDoFarm(id);
+    if (contaTtpost && contaTtpost.active !== false) {
+      enfileirarComandoTtpost('desativar_conta', contaTtpost, 'Conta excluída do Farm');
+    }
+    data.ttpost.contas = data.ttpost.contas.filter(c => c.farm_id !== id);
     data.farm = data.farm.filter(f => f.id !== id);
     data.farm_historico = data.farm_historico.filter(h => h.farm_id !== id);
     recalcularCustosFarm(); // remover a conta muda a divisão dos recursos dela
@@ -971,7 +1313,7 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 7,
+      versao: 8,
       exportado_em: now(),
       meta_anual: data.meta_anual,
       emails: data.emails,
@@ -983,6 +1325,7 @@ const DB = (() => {
       ofertas: data.ofertas,
       ofertas_historico: data.ofertas_historico,
       ofertas_grupos: data.ofertas_grupos,
+      ttpost: data.ttpost,
     }, null, 2);
   }
 
@@ -1004,6 +1347,7 @@ const DB = (() => {
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
     const ofertasHist = Array.isArray(obj.ofertas_historico) ? obj.ofertas_historico : [];
     const ofertasGrupos = Array.isArray(obj.ofertas_grupos) ? obj.ofertas_grupos : [];
+    const ttpost = normalizarTtpost(obj.ttpost);
     if (ofertas.some(o => !o.id || !Array.isArray(o.receitas)))
       throw new Error('Backup corrompido: ofertas em formato inválido.');
     // Migração dos itens de farm (custo_proprio/recursos)
@@ -1016,6 +1360,7 @@ const DB = (() => {
       farm, farm_historico: farmHist, farm_recursos: farmRecursos,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
       emails: Array.isArray(obj.emails) ? obj.emails : [],
+      ttpost,
       meta_anual: obj.meta_anual != null ? obj.meta_anual : 10000,
     };
     recalcularCustosFarm();
@@ -1031,11 +1376,16 @@ const DB = (() => {
       farmEventos: data.farm_historico.length,
       ofertas: data.ofertas.length,
       ofertasEventos: data.ofertas_historico.length,
+      ttpostContas: data.ttpost.contas.length,
+      ttpostCustos: data.ttpost.custos.length,
     };
   }
 
+  // Atualiza custos dependentes do tempo ao abrir o app, sem exigir uma edição.
+  recalcularCustosFarm();
+
   return {
-    STATUS, FARM_STATUS, OFERTAS_CATEGORIAS,
+    STATUS, FARM_STATUS, OFERTAS_CATEGORIAS, TTPOST_CUSTO_BASES, TTPOST_ESCOPOS,
     criarConta, atualizarConta, alterarStatus, registrarVenda, cancelarVenda, excluirConta,
     getConta, listarContas, historicoDaConta,
     indicadores, lucroMensal,
@@ -1050,6 +1400,10 @@ const DB = (() => {
     evolucaoMensal, atividadeRecente,
     getMetaAnual, setMetaAnual,
     adicionarEmails, listarEmails, alternarEmail, excluirEmail, contarEmails,
+    listarCustosTtpost, salvarCustoTtpost, excluirCustoTtpost,
+    listarContasTtpost, salvarContaTtpost, excluirContaTtpost, rankingTtpost,
+    listarEstoquesTtpost, salvarEstoqueTtpost, excluirEstoqueTtpost,
+    resumoTtpost, detalharCustoTtpostFarm, custoOperacionalTtpostFarm,
     exportar, importar, totais,
   };
 })();
