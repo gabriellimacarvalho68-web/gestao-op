@@ -150,4 +150,16 @@ assert.strictEqual(DB.getFarm(zVendida.id).lucro, lucroVendidaAntes, 'lucro já 
 assert.ok(zerados >= 1, 'deveria reportar ao menos uma conta zerada');
 assert.strictEqual(DB.zerarCustosFarmCrescendo(), 0, 'rodar de novo não deve afetar nenhuma conta');
 
+// ---- 9. Venda com data retroativa não estica os dias em Crescendo ----
+
+// addFarmHistorico carimba o evento com a hora atual, então uma venda ocorrida
+// em julho mas digitada hoje não pode fazer a conta contar como Crescendo até
+// hoje — quem manda no fim da conta é data_venda.
+const contaRetro = DB.criarFarm({ username: 'venda-retroativa', data_inicio: iso(1) });
+DB.registrarVendaFarm(contaRetro.id, { preco_venda: 300, data_venda: iso(10) });
+
+const diasRetro = DB.diasCrescendoNoMes(contaRetro.id, ANO, MES);
+assert.ok(Math.abs(diasRetro - 9) < 0.01, `venda-retroativa deveria ter 9 dias (vendida no dia 10); obteve ${diasRetro}`);
+assert.strictEqual(DB.diasCrescendoNoMes(contaRetro.id, ANO, MES + 1), 0, 'conta vendida não pode contar dias depois da data da venda');
+
 console.log('Farm — Custos do mês: testes concluídos com sucesso.');

@@ -295,16 +295,21 @@ const DB = (() => {
   function statusIntervalsFarm(f) {
     const eventos = historicoDoFarm(f.id)
       .filter(h => h.evento.startsWith('Estágio alterado para '));
+    // A venda encerra a conta na data_venda informada pelo usuário, que pode
+    // ser bem anterior ao registro no app — o histórico é carimbado com a hora
+    // em que a venda foi digitada, então sozinho ele esticaria a conta como
+    // "Crescendo" até o dia da digitação.
+    const fimDeTudo = f.data_venda ? new Date(f.data_venda).getTime() : Date.now();
     let cursor = new Date(f.data_inicio || f.criado_em).getTime();
     let statusAtual = 'Crescendo';
     const intervalos = [];
     eventos.forEach(h => {
-      const t = new Date(h.criado_em).getTime();
+      const t = Math.min(new Date(h.criado_em).getTime(), fimDeTudo);
       if (t > cursor) intervalos.push({ status: statusAtual, inicio: cursor, fim: t });
       statusAtual = h.evento.slice('Estágio alterado para '.length);
       cursor = t;
     });
-    intervalos.push({ status: statusAtual, inicio: cursor, fim: Date.now() });
+    if (fimDeTudo > cursor) intervalos.push({ status: statusAtual, inicio: cursor, fim: fimDeTudo });
     return intervalos;
   }
 

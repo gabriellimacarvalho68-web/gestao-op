@@ -2729,6 +2729,8 @@ function renderFarmCustosMes(param) {
       <h2>Prévia do rateio</h2>
       <div class="card detail-rows">
         <div class="detail-row"><span class="k">Total lançado</span><span class="v" style="font-weight:700;">${fmtBRL(preview.total)}</span></div>
+        <div class="detail-row"><span class="k">No rateio</span><span class="v">${preview.porConta.length} conta(s) · ${preview.totalDias.toFixed(1)}d</span></div>
+        ${preview.totalDias > 0 ? `<div class="detail-row"><span class="k">Custo por dia de conta</span><span class="v">${fmtBRL(preview.total / preview.totalDias)}</span></div>` : ''}
         ${preview.porConta.length
           ? preview.porConta.map(x => `<div class="detail-row"><span class="k">@${esc(x.username.replace(/^@/, ''))} <span class="k-sub">${x.dias.toFixed(1)}d</span></span><span class="v">${fmtBRL(x.valor)}</span></div>`).join('')
           : `<div class="detail-row"><span class="k">Nenhuma conta esteve em Crescendo neste mês.</span></div>`}
