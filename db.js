@@ -90,6 +90,23 @@ const DB = (() => {
     return t;
   }
 
+  // Congela, uma única vez, o custo de recursos/proxies calculado pela
+  // fórmula antiga (custo_total do recurso dividido pelas contas que o
+  // usavam). Preserva o lucro já realizado ao aposentar o sistema de
+  // Recursos compartilhados em favor dos Custos do mês.
+  function migrarCustoRecursosLegado(farmList, recursosList) {
+    farmList.forEach(f => {
+      if (f.custo_recursos_legado != null) return;
+      const recs = Array.isArray(f.recursos) ? f.recursos : [];
+      f.custo_recursos_legado = recs.reduce((total, rid) => {
+        const r = recursosList.find(x => x.id === rid);
+        if (!r) return total;
+        const n = farmList.filter(x => (x.recursos || []).includes(rid)).length;
+        return total + (n > 0 ? Number(r.custo_total || 0) / n : 0);
+      }, 0);
+    });
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
@@ -101,6 +118,7 @@ const DB = (() => {
         obj.farm = obj.farm || [];
         obj.farm_historico = obj.farm_historico || [];
         obj.farm_recursos = obj.farm_recursos || [];
+        obj.farm_custos_mensais = obj.farm_custos_mensais || [];
         obj.ofertas = obj.ofertas || [];
         obj.ofertas.forEach(o => {
           if (o.investimento_em == null) o.investimento_em = o.criado_em || null;
@@ -115,10 +133,11 @@ const DB = (() => {
           if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
           if (!Array.isArray(f.recursos)) f.recursos = [];
         });
+        migrarCustoRecursosLegado(obj.farm, obj.farm_recursos);
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
   }
 
   let data = load();
@@ -171,20 +190,6 @@ const DB = (() => {
   function calcLucroFarm(f) {
     if (f.preco_venda == null) return 0;
     return Number(f.preco_venda) - Number(f.custo || 0);
-  }
-
-  // ---- Recursos compartilhados do farm (proxies etc.) ----
-  // Quantas contas usam um recurso (divisor do custo)
-  function contasDoRecurso(recursoId) {
-    return data.farm.filter(f => (f.recursos || []).includes(recursoId)).length;
-  }
-
-  // Fatia do custo de um recurso por conta que o usa
-  function custoRecursoPorConta(recursoId) {
-    const r = data.farm_recursos.find(x => x.id === recursoId);
-    if (!r) return 0;
-    const n = contasDoRecurso(recursoId);
-    return n > 0 ? Number(r.custo_total || 0) / n : 0;
   }
 
   // ---- TTpost: vínculos, ranking, estoque e custos operacionais ----
@@ -259,21 +264,141 @@ const DB = (() => {
     return detalharCustoTtpostFarm(farmId).total;
   }
 
-  // Custo total = aquisição + recursos compartilhados.
-  // Custos operacionais antigos do TTpost ficam preservados apenas no backup.
+  // Custo total = aquisição + custo de recursos legado (congelado na
+  // migração) + soma dos Custos do mês já fechados que couberam a esta
+  // conta. Custos operacionais antigos do TTpost ficam preservados apenas
+  // no backup.
   function custoTotalFarm(f) {
-    let total = Number(f.custo_proprio || 0);
-    (f.recursos || []).forEach(rid => { total += custoRecursoPorConta(rid); });
-    return total;
+    const custosMensais = data.farm_custos_mensais
+      .filter(m => m.fechado)
+      .flatMap(m => m.splits)
+      .filter(s => s.farm_id === f.id)
+      .reduce((s, x) => s + Number(x.valor || 0), 0);
+    return Number(f.custo_proprio || 0) + Number(f.custo_recursos_legado || 0) + custosMensais;
   }
 
   // Recalcula o custo (e o lucro das vendidas) de TODAS as contas de farm.
-  // Chamado sempre que muda um recurso, um vínculo ou o custo próprio.
+  // Chamado sempre que muda o custo próprio de uma conta ou um mês fecha.
   function recalcularCustosFarm() {
     data.farm.forEach(f => {
       f.custo = custoTotalFarm(f);
       f.lucro = calcLucroFarm(f);
     });
+  }
+
+  // ---- Custos do mês do Farm (substitui Recursos compartilhados) ----
+
+  // Reconstrói os intervalos de estágio de uma conta a partir do histórico
+  // (todo evento 'Estágio alterado para X' já é gravado com timestamp em
+  // alterarStatusFarm/registrarVendaFarm/cancelarVendaFarm). A conta sempre
+  // nasce em 'Crescendo' a partir de data_inicio.
+  function statusIntervalsFarm(f) {
+    const eventos = historicoDoFarm(f.id)
+      .filter(h => h.evento.startsWith('Estágio alterado para '));
+    let cursor = new Date(f.data_inicio || f.criado_em).getTime();
+    let statusAtual = 'Crescendo';
+    const intervalos = [];
+    eventos.forEach(h => {
+      const t = new Date(h.criado_em).getTime();
+      if (t > cursor) intervalos.push({ status: statusAtual, inicio: cursor, fim: t });
+      statusAtual = h.evento.slice('Estágio alterado para '.length);
+      cursor = t;
+    });
+    intervalos.push({ status: statusAtual, inicio: cursor, fim: Date.now() });
+    return intervalos;
+  }
+
+  // Dias que uma conta passou em 'Crescendo' dentro de um mês (0-11) —
+  // usado como peso para dividir os Custos do mês. Não conta dias futuros:
+  // um mês em andamento cresce dia a dia até o fechamento.
+  function diasCrescendoNoMes(farmId, ano, mes) {
+    const f = getFarm(farmId);
+    if (!f) return 0;
+    const inicioMes = new Date(ano, mes, 1).getTime();
+    const fimMes = new Date(ano, mes + 1, 1).getTime();
+    const limiteFim = Math.min(fimMes, Date.now());
+    let total = 0;
+    statusIntervalsFarm(f).forEach(iv => {
+      if (iv.status !== 'Crescendo') return;
+      const inicio = Math.max(iv.inicio, inicioMes);
+      const fim = Math.min(iv.fim, limiteFim);
+      if (fim > inicio) total += (fim - inicio) / 86400000;
+    });
+    return total;
+  }
+
+  function getFarmCustosMes(ano, mes) {
+    return data.farm_custos_mensais.find(m => m.ano === ano && m.mes === mes) || null;
+  }
+
+  function garantirFarmCustosMes(ano, mes) {
+    let m = getFarmCustosMes(ano, mes);
+    if (!m) {
+      m = { id: uuid(), ano, mes, itens: [], fechado: false, fechado_em: null, splits: [] };
+      data.farm_custos_mensais.push(m);
+    }
+    return m;
+  }
+
+  function adicionarFarmCustoMes(ano, mes, { nome, valor }) {
+    if (valor == null || valor === '' || isNaN(Number(valor)) || Number(valor) < 0)
+      throw new Error('Informe um valor de custo válido.');
+    const m = garantirFarmCustosMes(ano, mes);
+    if (m.fechado) throw new Error('Este mês já foi fechado.');
+    const item = { id: uuid(), nome: String(nome || '').trim(), valor: Number(valor), criado_em: now() };
+    m.itens.push(item);
+    persist();
+    return item;
+  }
+
+  function excluirFarmCustoMes(mesId, itemId) {
+    const m = data.farm_custos_mensais.find(x => x.id === mesId);
+    if (!m) throw new Error('Mês não encontrado.');
+    if (m.fechado) throw new Error('Este mês já foi fechado.');
+    m.itens = m.itens.filter(i => i.id !== itemId);
+    persist();
+  }
+
+  // Prévia ao vivo (não grava nada): total lançado e, por conta, quantos
+  // dias em Crescendo ela teria neste mês e qual seria sua fatia.
+  function previewFechamentoFarmCustosMes(ano, mes) {
+    const m = getFarmCustosMes(ano, mes);
+    const total = m ? m.itens.reduce((s, i) => s + Number(i.valor || 0), 0) : 0;
+    const porConta = data.farm.map(f => ({
+      farm_id: f.id, username: f.username, dias: diasCrescendoNoMes(f.id, ano, mes),
+    })).filter(x => x.dias > 0);
+    const totalDias = porConta.reduce((s, x) => s + x.dias, 0);
+    porConta.forEach(x => { x.valor = totalDias > 0 ? total * (x.dias / totalDias) : 0; });
+    return { total, totalDias, porConta };
+  }
+
+  // Custos do mês já fechados que couberam a uma conta específica, do mais
+  // recente para o mais antigo — usado na tela de detalhes da conta.
+  function custosMensaisAplicadosFarm(farmId) {
+    return data.farm_custos_mensais
+      .filter(m => m.fechado)
+      .flatMap(m => m.splits.filter(s => s.farm_id === farmId).map(s => ({ ano: m.ano, mes: m.mes, valor: s.valor, dias: s.dias })))
+      .sort((a, b) => (b.ano - a.ano) || (b.mes - a.mes));
+  }
+
+  function fecharFarmCustosMes(ano, mes) {
+    const m = getFarmCustosMes(ano, mes);
+    if (!m) throw new Error('Nenhum custo lançado neste mês.');
+    if (m.fechado) throw new Error('Este mês já foi fechado.');
+    const preview = previewFechamentoFarmCustosMes(ano, mes);
+    if (preview.totalDias === 0)
+      throw new Error('Nenhuma conta esteve em Crescendo neste mês — não há como dividir o custo lançado.');
+    m.splits = preview.porConta.map(x => ({ farm_id: x.farm_id, dias: x.dias, valor: x.valor }));
+    m.fechado = true;
+    m.fechado_em = now();
+    recalcularCustosFarm();
+    const rotulo = MESES_NOME[mes] + '/' + ano;
+    m.splits.forEach(s => {
+      addFarmHistorico(s.farm_id, 'Custo do mês aplicado',
+        `${rotulo}: ${fmtBRL(s.valor)} (${s.dias.toFixed(1)} dia(s) em Crescendo).`);
+    });
+    persist();
+    return m;
   }
 
   function listarCustosTtpost() {
@@ -498,44 +623,6 @@ const DB = (() => {
       comandosPendentes: data.ttpost.comandos.filter(c => c.status === 'pendente').length,
       atualizado_em: data.ttpost.atualizado_em,
     };
-  }
-
-  function listarRecursosFarm() {
-    return [...data.farm_recursos].sort((a, b) => a.criado_em.localeCompare(b.criado_em));
-  }
-
-  function criarRecursoFarm(nome, custoTotal) {
-    nome = String(nome || '').trim();
-    if (!nome) throw new Error('Dê um nome ao recurso.');
-    if (custoTotal == null || custoTotal === '' || isNaN(Number(custoTotal)) || Number(custoTotal) < 0)
-      throw new Error('Informe um custo válido para o recurso.');
-    const r = { id: uuid(), nome, custo_total: Number(custoTotal), criado_em: now() };
-    data.farm_recursos.push(r);
-    persist();
-    return r;
-  }
-
-  function atualizarRecursoFarm(id, { nome, custo_total }) {
-    const r = data.farm_recursos.find(x => x.id === id);
-    if (!r) throw new Error('Recurso não encontrado.');
-    if (nome != null) {
-      const n = String(nome).trim();
-      if (!n) throw new Error('Dê um nome ao recurso.');
-      r.nome = n;
-    }
-    if (custo_total != null && custo_total !== '' && !isNaN(Number(custo_total)) && Number(custo_total) >= 0) {
-      r.custo_total = Number(custo_total);
-    }
-    recalcularCustosFarm(); // custo por conta muda
-    persist();
-    return r;
-  }
-
-  function excluirRecursoFarm(id) {
-    data.farm_recursos = data.farm_recursos.filter(r => r.id !== id);
-    data.farm.forEach(f => { f.recursos = (f.recursos || []).filter(rid => rid !== id); });
-    recalcularCustosFarm();
-    persist();
   }
 
   // Username único dentro do farm (independente das contas de compra/venda)
@@ -1361,7 +1448,7 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 9,
+      versao: 10,
       exportado_em: now(),
       meta_anual: data.meta_anual,
       emails: data.emails,
@@ -1370,6 +1457,7 @@ const DB = (() => {
       farm: data.farm,
       farm_historico: data.farm_historico,
       farm_recursos: data.farm_recursos,
+      farm_custos_mensais: data.farm_custos_mensais,
       ofertas: data.ofertas,
       ofertas_historico: data.ofertas_historico,
       ofertas_grupos: data.ofertas_grupos,
@@ -1390,6 +1478,7 @@ const DB = (() => {
     const farm = Array.isArray(obj.farm) ? obj.farm : [];
     const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
     const farmRecursos = Array.isArray(obj.farm_recursos) ? obj.farm_recursos : [];
+    const farmCustosMensais = Array.isArray(obj.farm_custos_mensais) ? obj.farm_custos_mensais : [];
     if (farm.some(f => !f.id || !f.username))
       throw new Error('Backup corrompido: farm sem id/username.');
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
@@ -1406,9 +1495,10 @@ const DB = (() => {
       if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
       if (!Array.isArray(f.recursos)) f.recursos = [];
     });
+    migrarCustoRecursosLegado(farm, farmRecursos);
     data = {
       contas: obj.contas, historico: obj.historico,
-      farm, farm_historico: farmHist, farm_recursos: farmRecursos,
+      farm, farm_historico: farmHist, farm_recursos: farmRecursos, farm_custos_mensais: farmCustosMensais,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
       emails: Array.isArray(obj.emails) ? obj.emails : [],
       ttpost,
@@ -1442,8 +1532,8 @@ const DB = (() => {
     indicadores, lucroMensal,
     criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
-    listarRecursosFarm, criarRecursoFarm, atualizarRecursoFarm, excluirRecursoFarm,
-    contasDoRecurso, custoRecursoPorConta,
+    diasCrescendoNoMes, getFarmCustosMes, adicionarFarmCustoMes, excluirFarmCustoMes,
+    previewFechamentoFarmCustosMes, fecharFarmCustosMes, custosMensaisAplicadosFarm,
     listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,

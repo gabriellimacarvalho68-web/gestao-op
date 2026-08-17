@@ -258,7 +258,7 @@ function router() {
     else if (parts[1] === 'conta' && parts[2]) renderFarmDetalhes(parts[2]);
     else if (parts[1] === 'venda' && parts[2]) renderFarmVenda(parts[2]);
     else if (parts[1] === 'editar' && parts[2]) renderEditarFarm(parts[2]);
-    else if (parts[1] === 'recursos') renderFarmRecursos();
+    else if (parts[1] === 'custos') renderFarmCustosMes(parts[2]);
     else renderFarmDashboard();
   }
   else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
@@ -1712,8 +1712,8 @@ function renderFarmDashboard() {
 
     ${searchHTML('farm-search', 'Pesquisar username ou plataforma')}
 
-    <a class="recurso-link" href="#/farm/recursos">
-      <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>Recursos compartilhados (proxies)</span>
+    <a class="recurso-link" href="#/farm/custos">
+      <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a1 1 0 0 1 1 1v1.06a5.5 5.5 0 0 1 4.44 4.44H18.5a1 1 0 1 1 0 2h-1.06a5.5 5.5 0 0 1-4.44 4.44V16a1 1 0 1 1-2 0v-1.06A5.5 5.5 0 0 1 6.56 10.5H5.5a1 1 0 1 1 0-2h1.06A5.5 5.5 0 0 1 11 4.06V3a1 1 0 0 1 1-1zm0 4a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM4 19a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1z"/></svg>Custos do mês</span>
       <span class="op-chevron">›</span>
     </a>
 
@@ -1834,24 +1834,6 @@ function renderFarmLista() {
 /* ============================================================
    FARM — CADASTRO  (#/farm/nova)
    ============================================================ */
-// Checkboxes dos recursos (proxies) para vincular numa conta de farm
-function recursosCheckboxesHTML(selecionados) {
-  const recursos = DB.listarRecursosFarm();
-  if (!recursos.length) {
-    return `<p style="font-size:13px;color:var(--ink-2);">Nenhum recurso criado ainda. <a href="#/farm/recursos" style="color:var(--primary);font-weight:600;">Criar recurso (proxy)</a></p>`;
-  }
-  return `<div class="rec-checks">` + recursos.map(r => {
-    const n = DB.contasDoRecurso(r.id);
-    const checked = selecionados.includes(r.id);
-    return `
-      <label class="rec-check">
-        <input type="checkbox" name="recurso" value="${r.id}" ${checked ? 'checked' : ''}>
-        <span class="rec-check-nome">${esc(r.nome)}</span>
-        <span class="rec-check-info">${fmtBRL(r.custo_total)} · ${n} conta(s)</span>
-      </label>`;
-  }).join('') + `</div>`;
-}
-
 function renderFarmCadastro() {
   $view.innerHTML = `
     <a class="back-link" href="#/farm">
@@ -1885,11 +1867,6 @@ function renderFarmCadastro() {
         <label>Custo de aquisição (R$)</label>
         <input name="custo_proprio" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
         <div class="field-hint">Quanto você pagou pela conta em si.</div>
-      </div>
-      <div class="form-group">
-        <label>Recursos compartilhados (proxies)</label>
-        ${recursosCheckboxesHTML([])}
-        <div class="field-hint">O custo de cada recurso é dividido entre as contas que o usam.</div>
       </div>
       <div class="form-group">
         <label>Estágio</label>
@@ -1989,7 +1966,6 @@ function renderFarmCadastro() {
         email: f.get('email'),
         senha: f.get('senha'),
         custo_proprio: f.get('custo_proprio'),
-        recursos: f.getAll('recurso'),
         status: f.get('status'),
         observacoes: f.get('observacoes'),
         email_reserva_id: emailReservaSelecionado ? emailReservaSelecionado.id : null,
@@ -2015,6 +1991,8 @@ function renderFarmDetalhes(id) {
   }
   const hist = DB.historicoDoFarm(id);
   const vendida = c.preco_venda != null;
+  const custosMensaisDaConta = DB.custosMensaisAplicadosFarm(id)
+    .map(s => ({ valor: s.valor, rotulo: `${MESES_ABREV[s.mes]}/${s.ano}` }));
 
   $view.innerHTML = `
     <a class="back-link" href="#/farm/lista">
@@ -2049,12 +2027,8 @@ function renderFarmDetalhes(id) {
     <h2>Financeiro</h2>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Custo de aquisição</span><span class="v">${fmtBRL(c.custo_proprio || 0)}</span></div>
-      ${(c.recursos || []).map(rid => {
-        const r = DB.listarRecursosFarm().find(x => x.id === rid);
-        if (!r) return '';
-        const n = DB.contasDoRecurso(rid);
-        return `<div class="detail-row"><span class="k">${esc(r.nome)} <span class="k-sub">(÷${n})</span></span><span class="v">${fmtBRL(DB.custoRecursoPorConta(rid))}</span></div>`;
-      }).join('')}
+      ${c.custo_recursos_legado > 0 ? `<div class="detail-row"><span class="k">Custo de recursos <span class="k-sub">(legado)</span></span><span class="v">${fmtBRL(c.custo_recursos_legado)}</span></div>` : ''}
+      ${custosMensaisDaConta.map(s => `<div class="detail-row"><span class="k">Custo do mês <span class="k-sub">(${esc(s.rotulo)})</span></span><span class="v">${fmtBRL(s.valor)}</span></div>`).join('')}
       <div class="detail-row"><span class="k">Custo total</span><span class="v" style="font-weight:700;">${fmtBRL(c.custo)}</span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
@@ -2357,11 +2331,6 @@ function renderEditarFarm(id) {
         <input name="custo_proprio" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo_proprio != null ? c.custo_proprio : c.custo}">
         <div class="field-hint">Quanto você pagou pela conta em si.</div>
       </div>
-      <div class="form-group">
-        <label>Recursos compartilhados (proxies)</label>
-        ${recursosCheckboxesHTML(c.recursos || [])}
-        <div class="field-hint">O custo de cada recurso é dividido entre as contas que o usam.</div>
-      </div>
       ${vendida ? `
       <div class="form-group">
         <label>Valor da venda (R$)</label>
@@ -2386,7 +2355,6 @@ function renderEditarFarm(id) {
         email: f.get('email'),
         senha: f.get('senha'),
         custo_proprio: f.get('custo_proprio'),
-        recursos: f.getAll('recurso'),
         preco_venda: f.get('preco_venda'),
         observacoes: f.get('observacoes'),
       });
@@ -2669,72 +2637,32 @@ function renderOfertas(param) {
 }
 
 /* ============================================================
-   RECURSOS DO FARM (proxies compartilhadas)  (#/farm/recursos)
+   CUSTOS DO MÊS DO FARM  (#/farm/custos  ·  #/farm/custos/AAAA-MM)
    ============================================================ */
-function recursoRowHTML(r) {
-  const n = DB.contasDoRecurso(r.id);
-  const porConta = DB.custoRecursoPorConta(r.id);
+function custoMesItemHTML(item) {
   return `
-    <div class="card recurso-card">
-      <div class="rc-info">
-        <div class="rc-nome">${esc(r.nome)}</div>
-        <div class="rc-meta">${fmtBRL(r.custo_total)} total · ${n} conta(s)</div>
-      </div>
-      <div class="rc-fin">
-        <div class="rc-val">${n > 0 ? fmtBRL(porConta) : '—'}</div>
-        <div class="rc-lbl">por conta</div>
-      </div>
-      <button class="senha-toggle" data-edit="${r.id}">editar</button>
+    <div class="detail-row" data-id="${item.id}">
+      <span class="k">${esc(item.nome) || 'Custo'}</span>
+      <span class="v">${fmtBRL(item.valor)} <button class="rr-del" data-id="${item.id}" aria-label="Excluir custo">✕</button></span>
     </div>`;
 }
 
-function sheetRecurso(recurso) {
-  const editar = !!recurso;
-  openSheet(`
-    <h3>${editar ? 'Editar recurso' : 'Novo recurso'}</h3>
-    <div class="form-group">
-      <label>Nome (ex.: Proxy Vivo #1)</label>
-      <input id="inp-rec-nome" type="text" value="${editar ? esc(recurso.nome) : ''}" placeholder="Proxy, chip, ferramenta…">
-    </div>
-    <div class="form-group">
-      <label>Custo total (R$)</label>
-      <input id="inp-rec-custo" type="number" inputmode="decimal" step="0.01" min="0" value="${editar ? recurso.custo_total : ''}" placeholder="0,00">
-    </div>
-    <div class="form-error" id="rec-err"></div>
-    <button class="btn btn-primary" id="save-rec">${editar ? 'Salvar' : 'Criar recurso'}</button>
-    ${editar ? '<button class="btn btn-danger-ghost" id="del-rec">Excluir recurso</button>' : ''}
-    <button class="btn btn-secondary" id="cancel-rec">Cancelar</button>
-  `, sheet => {
-    const nome = sheet.querySelector('#inp-rec-nome');
-    setTimeout(() => nome.focus(), 50);
-    sheet.querySelector('#save-rec').addEventListener('click', () => {
-      try {
-        const custo = sheet.querySelector('#inp-rec-custo').value;
-        if (editar) DB.atualizarRecursoFarm(recurso.id, { nome: nome.value, custo_total: custo });
-        else DB.criarRecursoFarm(nome.value, custo);
-        closeSheet();
-        toast(editar ? 'Recurso salvo ✓' : 'Recurso criado ✓');
-        renderFarmRecursos();
-      } catch (err) {
-        const e = sheet.querySelector('#rec-err');
-        e.textContent = err.message; e.classList.add('show');
-      }
-    });
-    const del = sheet.querySelector('#del-rec');
-    if (del) del.addEventListener('click', () => {
-      if (confirm(`Excluir o recurso "${recurso.nome}"? Ele será desvinculado de todas as contas e os custos recalculados.`)) {
-        DB.excluirRecursoFarm(recurso.id);
-        closeSheet();
-        toast('Recurso excluído');
-        renderFarmRecursos();
-      }
-    });
-    sheet.querySelector('#cancel-rec').addEventListener('click', closeSheet);
-  });
-}
+function renderFarmCustosMes(param) {
+  const agora = new Date();
+  let ano = agora.getFullYear(), mes = agora.getMonth();
+  if (param && /^\d{4}-\d{2}$/.test(param)) {
+    const [a, mm] = param.split('-').map(Number);
+    ano = a; mes = mm - 1;
+  }
+  const fmtParam = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const prevP = fmtParam(new Date(ano, mes - 1, 1));
+  const nextP = fmtParam(new Date(ano, mes + 1, 1));
+  const mesLabel = MESES_ABREV[mes] + '/' + ano;
 
-function renderFarmRecursos() {
-  const recursos = DB.listarRecursosFarm();
+  const m = DB.getFarmCustosMes(ano, mes);
+  const fechado = !!(m && m.fechado);
+  const itens = m ? m.itens : [];
+  const preview = DB.previewFechamentoFarmCustosMes(ano, mes);
 
   $view.innerHTML = `
     <a class="back-link" href="#/farm">
@@ -2742,26 +2670,107 @@ function renderFarmRecursos() {
       Farm
     </a>
     <div class="page-head">
-      <div class="page-head-row">
-        <div><h1>Recursos</h1><div class="subtitle">Custos compartilhados (proxies etc.)</div></div>
-        <button class="btn-small" id="btn-novo-recurso">+ Recurso</button>
-      </div>
+      <h1>Custos do mês</h1>
+      <div class="subtitle">Dividido proporcionalmente aos dias que cada conta passou em Crescendo</div>
     </div>
 
-    <div class="conta-list" id="recursos-lista">
-      ${recursos.length
-        ? recursos.map(recursoRowHTML).join('')
-        : `<div class="card empty"><p>Nenhum recurso ainda.<br>Crie uma proxy e vincule às contas no cadastro ou na edição.</p></div>`}
+    <div class="month-switch">
+      <a class="ms-arrow" href="#/farm/custos/${prevP}" aria-label="Mês anterior">‹</a>
+      <span class="ms-label">${mesLabel}</span>
+      <a class="ms-arrow" href="#/farm/custos/${nextP}" aria-label="Próximo mês">›</a>
     </div>
-    <p class="recurso-hint">O custo de cada recurso é dividido igualmente entre as contas que o usam. Adicione mais contas e a fatia de cada uma cai.</p>
+
+    ${fechado ? `
+      <div class="card detail-rows">
+        <div class="detail-row"><span class="k">Fechado em</span><span class="v">${fmtDataHora(m.fechado_em)}</span></div>
+        <div class="detail-row"><span class="k">Total dividido</span><span class="v" style="font-weight:700;">${fmtBRL(m.splits.reduce((s, x) => s + x.valor, 0))}</span></div>
+      </div>
+      <h2>Rateio congelado</h2>
+      <div class="card detail-rows">
+        ${m.splits.map(s => {
+          const f = DB.getFarm(s.farm_id);
+          return `<div class="detail-row"><span class="k">${f ? '@' + esc(f.username.replace(/^@/, '')) : '(conta removida)'} <span class="k-sub">${s.dias.toFixed(1)}d</span></span><span class="v">${fmtBRL(s.valor)}</span></div>`;
+        }).join('') || '<div class="detail-row"><span class="k">Nenhuma conta recebeu rateio.</span></div>'}
+      </div>
+    ` : `
+      <div class="section-row">
+        <h2>Lançamentos de ${mesLabel}</h2>
+        <button class="btn-small" id="btn-add-custo">+ Custo</button>
+      </div>
+      <div class="card" id="custos-lista">
+        ${itens.length
+          ? itens.map(custoMesItemHTML).join('')
+          : `<div class="empty" style="padding:24px;"><p>Nenhum custo lançado neste mês.</p></div>`}
+      </div>
+
+      <h2>Prévia do rateio</h2>
+      <div class="card detail-rows">
+        <div class="detail-row"><span class="k">Total lançado</span><span class="v" style="font-weight:700;">${fmtBRL(preview.total)}</span></div>
+        ${preview.porConta.length
+          ? preview.porConta.map(x => `<div class="detail-row"><span class="k">@${esc(x.username.replace(/^@/, ''))} <span class="k-sub">${x.dias.toFixed(1)}d</span></span><span class="v">${fmtBRL(x.valor)}</span></div>`).join('')
+          : `<div class="detail-row"><span class="k">Nenhuma conta esteve em Crescendo neste mês.</span></div>`}
+      </div>
+
+      <div style="margin-top:24px;">
+        <button class="btn btn-primary" id="btn-fechar-mes" ${(!itens.length || preview.totalDias === 0) ? 'disabled' : ''}>Fechar mês</button>
+      </div>
+      ${itens.length && preview.totalDias === 0
+        ? `<p class="recurso-hint">Nenhuma conta está em "Crescendo" neste mês — não dá para fechar até haver ao menos uma.</p>` : ''}
+    `}
   `;
 
-  document.getElementById('btn-novo-recurso').addEventListener('click', () => sheetRecurso(null));
-  document.getElementById('recursos-lista').addEventListener('click', e => {
-    const btn = e.target.closest('[data-edit]');
+  if (fechado) return;
+
+  document.getElementById('btn-add-custo').addEventListener('click', () => {
+    openSheet(`
+      <h3>Lançar custo — ${mesLabel}</h3>
+      <div class="form-group">
+        <label>Nome</label>
+        <input id="inp-custo-nome" type="text" placeholder="Ex.: Proxy Vivo, chip, ferramenta…">
+      </div>
+      <div class="form-group">
+        <label>Valor (R$)</label>
+        <input id="inp-custo-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+      </div>
+      <div class="form-error" id="sheet-err"></div>
+      <button class="btn btn-primary" id="save-custo">Lançar</button>
+      <button class="btn btn-secondary" id="cancel-custo">Cancelar</button>
+    `, sheet => {
+      const nome = sheet.querySelector('#inp-custo-nome');
+      setTimeout(() => nome.focus(), 50);
+      sheet.querySelector('#save-custo').addEventListener('click', () => {
+        try {
+          const valor = sheet.querySelector('#inp-custo-valor').value;
+          DB.adicionarFarmCustoMes(ano, mes, { nome: nome.value, valor });
+          closeSheet();
+          toast('Custo lançado ✓');
+          renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
+        } catch (err) {
+          const e = sheet.querySelector('#sheet-err');
+          e.textContent = err.message; e.classList.add('show');
+        }
+      });
+      sheet.querySelector('#cancel-custo').addEventListener('click', closeSheet);
+    });
+  });
+
+  document.getElementById('custos-lista').addEventListener('click', e => {
+    const btn = e.target.closest('[data-id]');
     if (!btn) return;
-    const r = DB.listarRecursosFarm().find(x => x.id === btn.dataset.edit);
-    if (r) sheetRecurso(r);
+    if (!confirm('Excluir este lançamento?')) return;
+    try {
+      DB.excluirFarmCustoMes(m.id, btn.dataset.id);
+      renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
+    } catch (err) { toast(err.message); }
+  });
+
+  document.getElementById('btn-fechar-mes').addEventListener('click', () => {
+    if (!confirm(`Fechar ${mesLabel}? O total de ${fmtBRL(preview.total)} será dividido entre ${preview.porConta.length} conta(s) e não poderá ser alterado depois.`)) return;
+    try {
+      DB.fecharFarmCustosMes(ano, mes);
+      toast('Mês fechado ✓');
+      renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
+    } catch (err) { toast(err.message); }
   });
 }
 
