@@ -746,6 +746,7 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 .ttp-stock-row strong, .ttp-cost-row strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ttp-stock-row small, .ttp-cost-row small { font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ttp-stock-row b, .ttp-cost-row b { flex: none; font-size: 16px; }
+.ttp-stock-row.repetida b { color: var(--ink-3); font-weight: 500; }
 .ttp-compact-empty { color: var(--ink-2); font-size: 13px; line-height: 1.45; padding: 16px; }
 .ttp-cost-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 9px; }
 .ttp-cost-summary > span { flex: 1; font-size: 13px; color: var(--ink-2); }

@@ -1434,6 +1434,7 @@ function renderTtpost(skipRemoteRefresh = false) {
     nome: p.name || 'Preset',
     pasta: p.folder || '',
     disponiveis: Number.isFinite(Number(p.videos_available)) ? Number(p.videos_available) : 0,
+    duplicada: !!p.duplicate_folder,
     remoto: true,
   })) : [];
   const estoques = estoquesRemotos.length ? estoquesRemotos : DB.listarEstoquesTtpost();
@@ -1503,7 +1504,8 @@ function renderTtpost(skipRemoteRefresh = false) {
         const baixo = !e.remoto && Number(e.disponiveis) <= Number(e.minimo);
         const tag = e.remoto ? 'div' : 'button';
         const stockAttr = e.remoto ? '' : ` data-ttp-stock="${e.id}"`;
-        return `<${tag} class="ttp-stock-row"${stockAttr}><span><strong>${esc(e.nome)}</strong><small>${esc(e.pasta) || 'Pasta ainda não informada'}</small></span><b class="${baixo ? 'neg' : ''}">${e.disponiveis}</b></${tag}>`;
+        const pasta = e.duplicada ? 'Mesma pasta de outro preset — não somada' : (esc(e.pasta) || 'Pasta ainda não informada');
+        return `<${tag} class="ttp-stock-row${e.duplicada ? ' repetida' : ''}"${stockAttr}><span><strong>${esc(e.nome)}</strong><small>${pasta}</small></span><b class="${baixo ? 'neg' : ''}">${e.disponiveis}</b></${tag}>`;
       }).join('') : '<div class="card ttp-compact-empty">Os estoques aparecerão aqui quando o TTpost enviar os Presets.</div>'}
     </div>
 
