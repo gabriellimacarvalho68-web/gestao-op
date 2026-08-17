@@ -133,4 +133,21 @@ const mesReimportado = backup2.farm_custos_mensais.find(m => m.ano === ANO && m.
 assert.strictEqual(mesReimportado.fechado, true);
 assert.deepStrictEqual(mesReimportado.splits, splitsCongelados);
 
+// ---- 8. Zerar custos só afeta contas em Crescendo ----
+
+const zCrescendo = DB.criarFarm({ username: 'zerar-crescendo', custo_proprio: 40, data_inicio: iso(1) });
+const zMonetizada = DB.criarFarm({ username: 'zerar-monetizada', custo_proprio: 70, data_inicio: iso(1) });
+DB.alterarStatusFarm(zMonetizada.id, 'Monetizada');
+const zVendida = DB.criarFarm({ username: 'zerar-vendida', custo_proprio: 60, data_inicio: iso(1) });
+DB.registrarVendaFarm(zVendida.id, { preco_venda: 200 });
+const lucroVendidaAntes = DB.getFarm(zVendida.id).lucro;
+
+const zerados = DB.zerarCustosFarmCrescendo();
+assert.strictEqual(DB.getFarm(zCrescendo.id).custo_proprio, 0, 'conta em Crescendo deveria ter o custo zerado');
+assert.strictEqual(DB.getFarm(zMonetizada.id).custo_proprio, 70, 'conta Monetizada não pode ser zerada');
+assert.strictEqual(DB.getFarm(zVendida.id).custo_proprio, 60, 'conta vendida não pode ser zerada');
+assert.strictEqual(DB.getFarm(zVendida.id).lucro, lucroVendidaAntes, 'lucro já realizado não pode mudar');
+assert.ok(zerados >= 1, 'deveria reportar ao menos uma conta zerada');
+assert.strictEqual(DB.zerarCustosFarmCrescendo(), 0, 'rodar de novo não deve afetar nenhuma conta');
+
 console.log('Farm — Custos do mês: testes concluídos com sucesso.');

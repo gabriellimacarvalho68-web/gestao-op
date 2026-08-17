@@ -401,6 +401,25 @@ const DB = (() => {
     return m;
   }
 
+  // Zera aquisição e legado das contas em Crescendo — virada de chave para o
+  // modelo de Custos do mês. Vendidas e demais estágios ficam intactos para
+  // não mexer no lucro já realizado.
+  function zerarCustosFarmCrescendo() {
+    const alvo = data.farm.filter(f => f.status === 'Crescendo' &&
+      (Number(f.custo_proprio || 0) > 0 || Number(f.custo_recursos_legado || 0) > 0));
+    alvo.forEach(f => {
+      const anterior = Number(f.custo_proprio || 0) + Number(f.custo_recursos_legado || 0);
+      f.custo_proprio = 0;
+      f.custo_recursos_legado = 0;
+      f.atualizado_em = now();
+      addFarmHistorico(f.id, 'Custos zerados',
+        `Custo anterior de ${fmtBRL(anterior)} zerado na virada para Custos do mês.`);
+    });
+    recalcularCustosFarm();
+    persist();
+    return alvo.length;
+  }
+
   function listarCustosTtpost() {
     return [...data.ttpost.custos].sort((a, b) =>
       String(a.criado_em || '').localeCompare(String(b.criado_em || ''))
@@ -1534,6 +1553,7 @@ const DB = (() => {
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
     diasCrescendoNoMes, getFarmCustosMes, adicionarFarmCustoMes, excluirFarmCustoMes,
     previewFechamentoFarmCustosMes, fecharFarmCustosMes, custosMensaisAplicadosFarm,
+    zerarCustosFarmCrescendo,
     listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,

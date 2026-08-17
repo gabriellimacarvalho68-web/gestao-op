@@ -1560,6 +1560,10 @@ function renderConfiguracoes() {
     ['percentual', 'Percentual', 'Exibe 100,0% ou 200,0%'],
     ['multiplicador', 'Multiplicador', 'Exibe 2,0x ou 3,0x'],
   ];
+  const crescendoComCusto = DB.listarFarm({ status: 'Crescendo' })
+    .filter(f => Number(f.custo_proprio || 0) > 0 || Number(f.custo_recursos_legado || 0) > 0);
+  const totalAZerar = crescendoComCusto.reduce((s, f) =>
+    s + Number(f.custo_proprio || 0) + Number(f.custo_recursos_legado || 0), 0);
 
   $view.innerHTML = `
     <a class="back-link" href="#/">
@@ -1581,6 +1585,18 @@ function renderConfiguracoes() {
           </button>`).join('')}
       </div>
     </div>
+
+    <div class="card settings-card">
+      <div class="setting-title">Zerar custos das contas em Crescendo</div>
+      <p style="font-size:13px;color:var(--ink-2);margin:8px 0 12px;">
+        Apaga o custo de aquisição e o custo de recursos antigo das contas em
+        Crescendo, para elas passarem a ter custo só pelos Custos do mês.
+        Vendidas e outros estágios não são tocados.
+      </p>
+      <div class="detail-row"><span class="k">Contas afetadas</span><span class="v">${crescendoComCusto.length}</span></div>
+      <div class="detail-row"><span class="k">Custo que será apagado</span><span class="v">${fmtBRL(totalAZerar)}</span></div>
+      <button class="btn btn-danger-ghost" id="btn-zerar-custos" ${crescendoComCusto.length ? '' : 'disabled'}>Zerar custos</button>
+    </div>
   `;
 
   document.querySelectorAll('[data-roi-format]').forEach(btn => {
@@ -1589,6 +1605,13 @@ function renderConfiguracoes() {
       toast('Formato do ROI atualizado ✓');
       renderConfiguracoes();
     });
+  });
+
+  document.getElementById('btn-zerar-custos').addEventListener('click', () => {
+    if (!confirm(`Zerar ${fmtBRL(totalAZerar)} de custo em ${crescendoComCusto.length} conta(s) em Crescendo? Faça um backup antes — isso não tem como desfazer.`)) return;
+    const n = DB.zerarCustosFarmCrescendo();
+    toast(`${n} conta(s) zerada(s) ✓`);
+    renderConfiguracoes();
   });
 }
 
