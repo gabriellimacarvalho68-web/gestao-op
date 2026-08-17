@@ -2715,6 +2715,10 @@ function renderFarmCustosMes(param) {
           return `<div class="detail-row"><span class="k">${f ? '@' + esc(f.username.replace(/^@/, '')) : '(conta removida)'} <span class="k-sub">${s.dias.toFixed(1)}d</span></span><span class="v">${fmtBRL(s.valor)}</span></div>`;
         }).join('') || '<div class="detail-row"><span class="k">Nenhuma conta recebeu rateio.</span></div>'}
       </div>
+      <div style="margin-top:24px;">
+        <button class="btn btn-danger-ghost" id="btn-reabrir-mes">Reabrir mês</button>
+      </div>
+      <p class="recurso-hint">Reabrir desfaz o rateio e devolve os lançamentos para edição. O custo (e o lucro de contas já vendidas) volta ao que era antes do fechamento.</p>
     ` : `
       <div class="section-row">
         <h2>Lançamentos de ${mesLabel}</h2>
@@ -2744,7 +2748,15 @@ function renderFarmCustosMes(param) {
     `}
   `;
 
-  if (fechado) return;
+  if (fechado) {
+    document.getElementById('btn-reabrir-mes').addEventListener('click', () => {
+      if (!confirm(`Reabrir ${mesLabel}? O rateio congelado será apagado e os custos das contas voltam ao que eram antes do fechamento.`)) return;
+      DB.reabrirFarmCustosMes(ano, mes);
+      toast('Mês reaberto ✓');
+      renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
+    });
+    return;
+  }
 
   document.getElementById('btn-add-custo').addEventListener('click', () => {
     openSheet(`

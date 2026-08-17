@@ -162,4 +162,24 @@ const diasRetro = DB.diasCrescendoNoMes(contaRetro.id, ANO, MES);
 assert.ok(Math.abs(diasRetro - 9) < 0.01, `venda-retroativa deveria ter 9 dias (vendida no dia 10); obteve ${diasRetro}`);
 assert.strictEqual(DB.diasCrescendoNoMes(contaRetro.id, ANO, MES + 1), 0, 'conta vendida não pode contar dias depois da data da venda');
 
+// ---- 10. Reabrir um mês desfaz o rateio e deixa fechar de novo ----
+
+assert.throws(() => DB.reabrirFarmCustosMes(ANO, MES - 2), /não encontrado/i);
+
+const custoDAntes = DB.getFarm(contaD.id).custo;
+const lucroDAntes = DB.getFarm(contaD.id).lucro;
+DB.reabrirFarmCustosMes(ANO, MES - 1);
+
+const junhoReaberto = DB.getFarmCustosMes(ANO, MES - 1);
+assert.strictEqual(junhoReaberto.fechado, false);
+assert.strictEqual(junhoReaberto.splits.length, 0, 'reabrir deve apagar o rateio congelado');
+assert.strictEqual(junhoReaberto.itens.length, 1, 'os lançamentos voltam para edição');
+assert.ok(Math.abs(DB.getFarm(contaD.id).custo - (custoDAntes - 90)) < 0.01, 'custo da conta-d deveria perder o split estornado');
+assert.ok(Math.abs(DB.getFarm(contaD.id).lucro - (lucroDAntes + 90)) < 0.01, 'lucro da conta-d deveria voltar ao valor sem o rateio');
+assert.throws(() => DB.reabrirFarmCustosMes(ANO, MES - 1), /não está fechado/);
+
+DB.adicionarFarmCustoMes(ANO, MES - 1, { nome: 'Extra', valor: 10 });
+DB.fecharFarmCustosMes(ANO, MES - 1);
+assert.ok(Math.abs(DB.getFarm(contaD.id).custo - 100) < 0.01, `custo da conta-d deveria ser 100 após refechar; obteve ${DB.getFarm(contaD.id).custo}`);
+
 console.log('Farm — Custos do mês: testes concluídos com sucesso.');

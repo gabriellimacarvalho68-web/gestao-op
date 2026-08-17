@@ -406,6 +406,26 @@ const DB = (() => {
     return m;
   }
 
+  // Desfaz um fechamento: apaga o rateio congelado e devolve os lançamentos
+  // para edição. Mexe no lucro de contas já vendidas que receberam fatia, por
+  // isso a tela confirma antes.
+  function reabrirFarmCustosMes(ano, mes) {
+    const m = getFarmCustosMes(ano, mes);
+    if (!m) throw new Error('Mês não encontrado.');
+    if (!m.fechado) throw new Error('Este mês não está fechado.');
+    const rotulo = MESES_NOME[mes] + '/' + ano;
+    m.splits.filter(s => getFarm(s.farm_id)).forEach(s => {
+      addFarmHistorico(s.farm_id, 'Custo do mês estornado',
+        `${rotulo}: ${fmtBRL(s.valor)} devolvido ao reabrir o mês.`);
+    });
+    m.splits = [];
+    m.fechado = false;
+    m.fechado_em = null;
+    recalcularCustosFarm();
+    persist();
+    return m;
+  }
+
   // Zera aquisição e legado das contas em Crescendo — virada de chave para o
   // modelo de Custos do mês. Vendidas e demais estágios ficam intactos para
   // não mexer no lucro já realizado.
@@ -1557,8 +1577,8 @@ const DB = (() => {
     criarFarm, atualizarFarm, alterarStatusFarm, registrarVendaFarm, cancelarVendaFarm, excluirFarm,
     getFarm, listarFarm, historicoDoFarm, indicadoresFarm,
     diasCrescendoNoMes, getFarmCustosMes, adicionarFarmCustoMes, excluirFarmCustoMes,
-    previewFechamentoFarmCustosMes, fecharFarmCustosMes, custosMensaisAplicadosFarm,
-    zerarCustosFarmCrescendo,
+    previewFechamentoFarmCustosMes, fecharFarmCustosMes, reabrirFarmCustosMes,
+    custosMensaisAplicadosFarm, zerarCustosFarmCrescendo,
     listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,
