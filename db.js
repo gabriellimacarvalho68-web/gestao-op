@@ -124,6 +124,7 @@ const DB = (() => {
         obj.farm_recursos = obj.farm_recursos || [];
         obj.farm_custos_mensais = obj.farm_custos_mensais || [];
         obj.farm_lotes = obj.farm_lotes || [];
+        obj.farm_custos_fixos = obj.farm_custos_fixos || [];
         obj.ofertas = obj.ofertas || [];
         obj.ofertas.forEach(o => {
           if (o.investimento_em == null) o.investimento_em = o.criado_em || null;
@@ -149,7 +150,7 @@ const DB = (() => {
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], farm_lotes: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], farm_lotes: [], farm_custos_fixos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
   }
 
   let data = load();
@@ -1118,29 +1119,58 @@ const DB = (() => {
       .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
   }
 
-  // O financeiro do Farm agora vive nos lotes: custo = soma dos custos totais
-  // dos lotes; receita = soma dos faturamentos lançados; lucro do farm = soma
-  // do lucro/prejuízo de todos os lotes.
-  function indicadoresFarm() {
-    const farm = data.farm;
-    const vendidas = farm.filter(f => f.status === 'Vendida');
-    const ativas = farm.filter(f => f.status !== 'Vendida');
-    const investido = data.farm_lotes.reduce((s, l) => s + Number(l.custo_total || 0), 0);
+  // Total mensal dos custos fixos da operação (recorrentes, valem todo mês).
+  function totalFarmCustosFixosMensal() {
+    return data.farm_custos_fixos.reduce((s, c) => s + Number(c.valor || 0), 0);
+  }
+
+  // Financeiro do Farm calculado POR MÊS (mês corrente por padrão) — zera
+  // sozinho ao virar o mês, porque tudo é filtrado por new Date().
+  //   receita  = faturamentos dos lotes lançados no mês
+  //   custo    = custo dos lotes CRIADOS no mês + custos fixos mensais
+  //   lucro    = receita − custo
+  // Contadores operacionais (em farm agora, por estágio) são do estado atual;
+  // "vendidas" é quantas foram marcadas como vendidas dentro do mês.
+  function indicadoresFarm(ano, mes) {
+    const agora = new Date();
+    if (!Number.isInteger(ano)) ano = agora.getFullYear();
+    if (!Number.isInteger(mes)) mes = agora.getMonth();
+    const inicioMes = new Date(ano, mes, 1).getTime();
+    const fimMes = new Date(ano, mes + 1, 1).getTime();
+    const noMes = iso => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return t >= inicioMes && t < fimMes;
+    };
+
     const receita = data.farm_lotes.reduce((s, l) =>
-      s + l.receitas.reduce((t, r) => t + Number(r.valor || 0), 0), 0);
+      s + l.receitas.filter(r => noMes(r.data)).reduce((t, r) => t + Number(r.valor || 0), 0), 0);
+    const custoLotes = data.farm_lotes
+      .filter(l => noMes(l.criado_em))
+      .reduce((s, l) => s + Number(l.custo_total || 0), 0);
+    const custosFixos = totalFarmCustosFixosMensal();
+    const investido = custoLotes + custosFixos;
     const lucro = receita - investido;
+
+    const farm = data.farm;
+    const ativas = farm.filter(f => f.status !== 'Vendida');
+    const vendidasMes = farm.filter(f => f.status === 'Vendida' && noMes(f.data_venda));
 
     const porEstagio = {};
     FARM_STATUS.forEach(s => { porEstagio[s] = 0; });
     farm.forEach(f => { if (porEstagio[f.status] != null) porEstagio[f.status]++; });
 
     return {
+      ano, mes,
       total: farm.length,
       ativas: ativas.length,
-      vendidas: vendidas.length,
+      vendidas: vendidasMes.length,
+      vendidasTotal: farm.filter(f => f.status === 'Vendida').length,
       lotes: data.farm_lotes.length,
-      investido,
       receita,
+      custoLotes,
+      custosFixos,
+      investido,
       lucro,
       porEstagio,
     };
@@ -1235,6 +1265,38 @@ const DB = (() => {
   function excluirFarmLote(id) {
     data.farm.forEach(f => { if (f.lote_id === id) f.lote_id = null; });
     data.farm_lotes = data.farm_lotes.filter(l => l.id !== id);
+    persist();
+  }
+
+  // ---- Custos fixos da operação (recorrentes, entram todo mês) ----
+  function listarFarmCustosFixos() {
+    return [...data.farm_custos_fixos].sort((a, b) =>
+      String(a.criado_em || '').localeCompare(String(b.criado_em || '')));
+  }
+
+  function adicionarFarmCustoFixo({ nome, valor } = {}) {
+    if (valor == null || valor === '' || isNaN(Number(valor)) || Number(valor) < 0)
+      throw new Error('Informe um valor de custo válido.');
+    const item = { id: uuid(), nome: String(nome || '').trim(), valor: Number(valor), criado_em: now() };
+    data.farm_custos_fixos.push(item);
+    persist();
+    return item;
+  }
+
+  function atualizarFarmCustoFixo(id, { nome, valor } = {}) {
+    const c = data.farm_custos_fixos.find(x => x.id === id);
+    if (!c) throw new Error('Custo fixo não encontrado.');
+    if (nome != null) c.nome = String(nome).trim();
+    if (valor != null && valor !== '') {
+      if (isNaN(Number(valor)) || Number(valor) < 0) throw new Error('Informe um valor válido.');
+      c.valor = Number(valor);
+    }
+    persist();
+    return c;
+  }
+
+  function excluirFarmCustoFixo(id) {
+    data.farm_custos_fixos = data.farm_custos_fixos.filter(c => c.id !== id);
     persist();
   }
 
@@ -1656,7 +1718,7 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 11,
+      versao: 12,
       exportado_em: now(),
       meta_anual: data.meta_anual,
       emails: data.emails,
@@ -1667,6 +1729,7 @@ const DB = (() => {
       farm_recursos: data.farm_recursos,
       farm_custos_mensais: data.farm_custos_mensais,
       farm_lotes: data.farm_lotes,
+      farm_custos_fixos: data.farm_custos_fixos,
       ofertas: data.ofertas,
       ofertas_historico: data.ofertas_historico,
       ofertas_grupos: data.ofertas_grupos,
@@ -1693,6 +1756,7 @@ const DB = (() => {
       l.custo_total = Number(l.custo_total || 0);
       l.receitas = Array.isArray(l.receitas) ? l.receitas : [];
     });
+    const farmCustosFixos = Array.isArray(obj.farm_custos_fixos) ? obj.farm_custos_fixos : [];
     if (farm.some(f => !f.id || !f.username))
       throw new Error('Backup corrompido: farm sem id/username.');
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
@@ -1715,7 +1779,7 @@ const DB = (() => {
     data = {
       contas: obj.contas, historico: obj.historico,
       farm, farm_historico: farmHist, farm_recursos: farmRecursos, farm_custos_mensais: farmCustosMensais,
-      farm_lotes: farmLotes,
+      farm_lotes: farmLotes, farm_custos_fixos: farmCustosFixos,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
       emails: Array.isArray(obj.emails) ? obj.emails : [],
       ttpost,
@@ -1754,6 +1818,7 @@ const DB = (() => {
     custosMensaisAplicadosFarm, zerarCustosFarmCrescendo,
     listarFarmLotes, getFarmLote, contasDoLote, resumoLote, criarFarmLote,
     renomearFarmLote, definirCustoLote, adicionarReceitaLote, excluirReceitaLote, excluirFarmLote,
+    listarFarmCustosFixos, adicionarFarmCustoFixo, atualizarFarmCustoFixo, excluirFarmCustoFixo, totalFarmCustosFixosMensal,
     listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,

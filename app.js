@@ -260,6 +260,7 @@ function router() {
     else if (parts[1] === 'editar' && parts[2]) renderEditarFarm(parts[2]);
     else if (parts[1] === 'lotes') renderFarmLotes();
     else if (parts[1] === 'lote' && parts[2]) renderFarmLoteDetalhes(parts[2]);
+    else if (parts[1] === 'custos-fixos') renderFarmCustosFixos();
     else renderFarmDashboard();
   }
   else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
@@ -1783,18 +1784,25 @@ function renderFarmDashboard() {
       <span class="op-chevron">›</span>
     </a>
 
+    <a class="recurso-link" href="#/farm/custos-fixos">
+      <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6zm0 8a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-4zm4-6.5A.5.5 0 0 1 7.5 7h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 1-.5-.5zM7 16h4v1H7v-1z"/></svg>Custos fixos${ind.custosFixos > 0 ? ` · ${fmtBRL(ind.custosFixos)}/mês` : ''}</span>
+      <span class="op-chevron">›</span>
+    </a>
+
+    <p class="recurso-hint" style="margin-top:14px;">Resultado de <strong>${MESES_ABREV[ind.mes]}/${ind.ano}</strong> — zera sozinho todo mês.</p>
     <div class="stats-grid">
       <div class="stat wide">
-        <div class="label">Lucro do farm</div>
+        <div class="label">Lucro do mês</div>
         <div class="value ${ind.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(ind.lucro)}</div>
-        <div class="sub">${ind.vendidas} ${ind.vendidas === 1 ? 'conta vendida' : 'contas vendidas'}</div>
+        <div class="sub">Faturamento ${fmtBRL(ind.receita)} − custo ${fmtBRL(ind.investido)}</div>
       </div>
       <div class="stat">
-        <div class="label">Custo investido</div>
+        <div class="label">Custo do mês</div>
         <div class="value">${fmtBRL(ind.investido)}</div>
+        <div class="sub">${fmtBRL(ind.custoLotes)} lotes + ${fmtBRL(ind.custosFixos)} fixos</div>
       </div>
       <div class="stat">
-        <div class="label">Receita</div>
+        <div class="label">Faturamento do mês</div>
         <div class="value">${fmtBRL(ind.receita)}</div>
       </div>
       <div class="stat">
@@ -1803,8 +1811,9 @@ function renderFarmDashboard() {
         <div class="sub">${ind.total} no total</div>
       </div>
       <div class="stat">
-        <div class="label">Vendidas</div>
+        <div class="label">Vendidas no mês</div>
         <div class="value">${ind.vendidas}</div>
+        <div class="sub">${ind.vendidasTotal} no total</div>
       </div>
     </div>
 
@@ -2961,6 +2970,104 @@ function renderFarmLoteDetalhes(id) {
     DB.excluirFarmLote(id);
     toast('Lote excluído');
     location.hash = '#/farm/lotes';
+  });
+}
+
+/* ============================================================
+   FARM — CUSTOS FIXOS  (#/farm/custos-fixos)
+   Custos recorrentes da operação; o total entra todo mês no
+   cálculo do Farm.
+   ============================================================ */
+function renderFarmCustosFixos() {
+  const itens = DB.listarFarmCustosFixos();
+  const total = DB.totalFarmCustosFixosMensal();
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Farm
+    </a>
+    <div class="page-head">
+      <div class="page-head-row">
+        <div><h1>Custos fixos</h1><div class="subtitle">Custos recorrentes da operação</div></div>
+        <button class="btn-small" id="btn-add-fixo">+ Custo</button>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat wide">
+        <div class="label">Total fixo por mês</div>
+        <div class="value">${fmtBRL(total)}</div>
+        <div class="sub">Entra todo mês no cálculo do Farm</div>
+      </div>
+    </div>
+
+    <h2>Lançamentos</h2>
+    <div class="card" id="fixos-lista">
+      ${itens.length
+        ? itens.map(c => `
+          <div class="receita-row" data-id="${c.id}">
+            <div class="rr-info">
+              <div class="rr-val">${fmtBRL(c.valor)}<span style="font-size:12px;color:var(--ink-3);font-weight:500;">/mês</span></div>
+              <div class="rr-meta">${esc(c.nome) || 'Custo fixo'}</div>
+            </div>
+            <button class="rr-del" data-id="${c.id}" aria-label="Excluir custo fixo">✕</button>
+          </div>`).join('')
+        : `<div class="empty" style="padding:24px;"><p>Nenhum custo fixo ainda.<br>Toque em <strong>+ Custo</strong> para adicionar.</p></div>`}
+    </div>
+    <p class="recurso-hint">Coloque aqui o que você paga todo mês independente dos lotes: proxies, chips, ferramentas, aluguel de aparelhos etc. O total é descontado do lucro do Farm de cada mês.</p>
+  `;
+
+  document.getElementById('btn-add-fixo').addEventListener('click', () => abrirSheetCustoFixo());
+
+  document.getElementById('fixos-lista').addEventListener('click', e => {
+    const del = e.target.closest('.rr-del');
+    if (del) {
+      if (!confirm('Excluir este custo fixo?')) return;
+      DB.excluirFarmCustoFixo(del.dataset.id);
+      renderFarmCustosFixos();
+      return;
+    }
+    const row = e.target.closest('.receita-row');
+    if (row) {
+      const item = DB.listarFarmCustosFixos().find(c => c.id === row.dataset.id);
+      if (item) abrirSheetCustoFixo(item);
+    }
+  });
+}
+
+function abrirSheetCustoFixo(item) {
+  const editando = !!item;
+  openSheet(`
+    <h3>${editando ? 'Editar custo fixo' : 'Novo custo fixo'}</h3>
+    <div class="form-group">
+      <label>Nome</label>
+      <input id="inp-fixo-nome" type="text" value="${editando ? esc(item.nome) : ''}" placeholder="Ex.: Proxies, chips, ferramenta…">
+    </div>
+    <div class="form-group">
+      <label>Valor por mês (R$)</label>
+      <input id="inp-fixo-valor" type="number" inputmode="decimal" step="0.01" min="0" value="${editando ? item.valor : ''}" placeholder="0,00">
+    </div>
+    <div class="form-error" id="sheet-err"></div>
+    <button class="btn btn-primary" id="save-fixo">${editando ? 'Salvar' : 'Adicionar'}</button>
+    <button class="btn btn-secondary" id="cancel-fixo">Cancelar</button>
+  `, sheet => {
+    const nome = sheet.querySelector('#inp-fixo-nome');
+    setTimeout(() => nome.focus(), 50);
+    sheet.querySelector('#save-fixo').addEventListener('click', () => {
+      try {
+        const valor = sheet.querySelector('#inp-fixo-valor').value;
+        if (editando) DB.atualizarFarmCustoFixo(item.id, { nome: nome.value, valor });
+        else DB.adicionarFarmCustoFixo({ nome: nome.value, valor });
+        closeSheet();
+        toast(editando ? 'Custo fixo salvo ✓' : 'Custo fixo adicionado ✓');
+        renderFarmCustosFixos();
+      } catch (err) {
+        const el = sheet.querySelector('#sheet-err');
+        el.textContent = err.message; el.classList.add('show');
+      }
+    });
+    sheet.querySelector('#cancel-fixo').addEventListener('click', closeSheet);
   });
 }
 

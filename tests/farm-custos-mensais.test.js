@@ -121,7 +121,7 @@ assert.strictEqual(JSON.stringify(mesAposExclusao.splits), JSON.stringify(splits
 // ---- 7. exportar()/importar() preserva farm_custos_mensais e não duplica custo_recursos_legado ----
 
 const backup1 = JSON.parse(DB.exportar());
-assert.strictEqual(backup1.versao, 11);
+assert.strictEqual(backup1.versao, 12);
 const legadoB1 = backup1.farm.find(f => f.id === contaB.id).custo_recursos_legado;
 
 DB.importar(JSON.stringify(backup1));
