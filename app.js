@@ -258,7 +258,8 @@ function router() {
     else if (parts[1] === 'conta' && parts[2]) renderFarmDetalhes(parts[2]);
     else if (parts[1] === 'venda' && parts[2]) renderFarmVenda(parts[2]);
     else if (parts[1] === 'editar' && parts[2]) renderEditarFarm(parts[2]);
-    else if (parts[1] === 'custos') renderFarmCustosMes(parts[2]);
+    else if (parts[1] === 'lotes') renderFarmLotes();
+    else if (parts[1] === 'lote' && parts[2]) renderFarmLoteDetalhes(parts[2]);
     else renderFarmDashboard();
   }
   else if (parts[0] === 'ofertas') renderOfertas(parts[1]);
@@ -318,21 +319,17 @@ function contaItemHTML(c) {
 
 function farmItemHTML(f) {
   const inicial = f.username.replace(/^@/, '').charAt(0) || '?';
-  const finTxt = f.preco_venda == null ? fmtBRL(f.custo) : fmtBRL(f.lucro);
-  const finLabel = f.preco_venda == null
-    ? `Custo`
-    : `V: ${fmtBRL(f.preco_venda)}`;
+  const lote = f.lote_id ? DB.getFarmLote(f.lote_id) : null;
   return `
     <a class="conta-item" href="#/farm/conta/${f.id}">
       <div class="avatar">${esc(inicial)}</div>
       <div class="info">
         <div class="username">@${esc(f.username.replace(/^@/, ''))}</div>
-        <div class="meta">${esc(f.plataforma || 'Sem plataforma')}</div>
+        <div class="meta">${lote ? esc(lote.nome) : 'Sem lote'}</div>
         <span class="badge ${esc(badgeSlug(f.status))}">${esc(f.status)}</span>
       </div>
       <div class="fin">
-        <div class="lucro ${f.preco_venda == null ? '' : lucroClass(f)}">${finTxt}</div>
-        <div class="valores">${finLabel}</div>
+        <div class="valores">${fmtData(f.data_inicio)}</div>
       </div>
     </a>`;
 }
@@ -356,7 +353,7 @@ function opCardHTML(op) {
   const aberta = APP_PREFS.get().operacoes_abertas[op.id] !== false;
   let extra = '';
   if (op.id === 'compra-venda') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.estoque} em estoque (${fmtBRL(op.extra.capitalEstoque)})`;
-  else if (op.id === 'farm') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.emFarm} em farm (${fmtBRL(op.extra.capitalFarm)})`;
+  else if (op.id === 'farm') extra = `${op.extra.vendidas} vendida(s) no mês · ${op.extra.emFarm} em farm · ${op.extra.lotes} lote(s)`;
   else if (op.id === 'ofertas') extra = `${op.extra.nichos} nicho(s) · ${op.extra.lancamentosMes} lançamento(s) no mês`;
   return `
     <article class="op-card ${aberta ? '' : 'collapsed'}" style="--op-cor:${cor}">
@@ -1420,12 +1417,55 @@ function ttpostMetaSheet(ranking) {
   });
 }
 
+// Marcação manual de quais perfis falharam a postagem de hoje. Vale só para o
+// dia atual (some sozinho ao virar o dia).
+function ttpostFalhasSheet(ranking) {
+  const perfis = (Array.isArray(ranking) ? ranking : []).map(c => ({
+    key: idMetaTtpost(c),
+    nome: c.nome_perfil || c.farm?.username || 'Perfil',
+    provider: TTPOST_SCOPE_LABEL[c.provider] || c.provider || '',
+  })).filter(p => p.key);
+  const marcadas = new Set(DB.getFalhasPostagemHoje());
+
+  openSheet(`
+    <h3>Falhas de postagem — hoje</h3>
+    <div class="field-hint ttp-sheet-hint">Marque os perfis que <b>não</b> conseguiram postar hoje. A marcação vale só para hoje e some sozinha amanhã.</div>
+    ${perfis.length ? `
+      <div class="opts ttp-falhas-lista">
+        ${perfis.map(p => `
+          <button type="button" class="opt ttp-falha-opt ${marcadas.has(p.key) ? 'marcada' : ''}" data-key="${esc(p.key)}">
+            <span><strong>${esc(p.nome)}</strong>${p.provider ? `<small>${esc(p.provider)}</small>` : ''}</span>
+            <span class="check">${marcadas.has(p.key) ? '✓' : ''}</span>
+          </button>`).join('')}
+      </div>` : '<div class="card ttp-compact-empty">Nenhum perfil disponível para marcar ainda.</div>'}
+    <div class="form-error" id="ttp-falhas-err"></div>
+    <button class="btn btn-primary" id="ttp-save-falhas">Salvar falhas</button>
+    <button class="btn btn-secondary" id="ttp-cancel-falhas">Cancelar</button>
+  `, sheet => {
+    sheet.querySelectorAll('.ttp-falha-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const on = btn.classList.toggle('marcada');
+        btn.querySelector('.check').textContent = on ? '✓' : '';
+      });
+    });
+    sheet.querySelector('#ttp-save-falhas').addEventListener('click', () => {
+      const keys = [...sheet.querySelectorAll('.ttp-falha-opt.marcada')].map(b => b.dataset.key);
+      DB.definirFalhasPostagemHoje(keys);
+      closeSheet();
+      toast(keys.length ? `${keys.length} falha(s) marcada(s) ✓` : 'Falhas limpas ✓');
+      renderTtpost(true);
+    });
+    sheet.querySelector('#ttp-cancel-falhas').addEventListener('click', closeSheet);
+  });
+}
+
 function renderTtpost(skipRemoteRefresh = false) {
   const resumoLocal = DB.resumoTtpost();
   const bridge = TTPOST_BRIDGE.state();
   const snapshot = bridge.snapshot;
   const summary = snapshot?.summary || null;
   const ranking = ttpostRankingRemoto(snapshot);
+  const falhasMarcadas = DB.getFalhasPostagemHoje();
   const metaSeguidores = DB.getMetaSeguidoresTtpost();
   const rankingExpandido = APP_PREFS.get().ranking_expandido;
   const rankingVisivel = rankingExpandido ? ranking : ranking.slice(0, 3);
@@ -1458,8 +1498,8 @@ function renderTtpost(skipRemoteRefresh = false) {
 
   $view.innerHTML = `
     <div class="page-head">
-      <div class="page-head-row">
-        <div><h1>TTpost</h1><div class="subtitle">Operação e crescimento</div></div>
+      <div class="page-head-row ttp-head-row">
+        <h1>TTpost</h1>
         <div class="ttp-head-actions">
           <button class="btn-small" id="ttp-config-bridge">Conexão</button>
           <button class="btn-small" id="ttp-meta">Meta</button>
@@ -1474,7 +1514,7 @@ function renderTtpost(skipRemoteRefresh = false) {
 
     <div class="stats-grid ttp-stats">
       <div class="stat"><div class="label">Contas ativas</div><div class="value">${resumo.ativas}</div><div class="sub">${snapshot ? 'nos Presets do PC' : `de ${resumo.contas} vinculadas`}</div></div>
-      <div class="stat"><div class="label">Posts hoje</div><div class="value">${resumo.postsHoje}</div><div class="sub">${resumo.falhasHoje} falha(s)</div></div>
+      <button type="button" class="stat stat-clicavel" id="ttp-posts-stat"><div class="label">Posts hoje</div><div class="value">${resumo.postsHoje}</div><div class="sub">${falhasMarcadas.length} falha(s) marcada(s) ›</div></button>
       <div class="stat"><div class="label">${snapshot ? 'Aquecendo agora' : 'Aquecimentos hoje'}</div><div class="value">${resumo.aquecimentosHoje}</div></div>
       <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${snapshot ? 'nas pastas dos Presets' : `${resumo.estoquesBaixos} estoque(s) baixo(s)`}</div></div>
     </div>
@@ -1523,6 +1563,7 @@ function renderTtpost(skipRemoteRefresh = false) {
   document.getElementById('ttp-config-bridge').addEventListener('click', ttpostBridgeSheet);
   document.getElementById('ttp-open-bridge').addEventListener('click', ttpostBridgeSheet);
   document.getElementById('ttp-meta').addEventListener('click', () => ttpostMetaSheet(ranking));
+  document.getElementById('ttp-posts-stat').addEventListener('click', () => ttpostFalhasSheet(ranking));
   const rankingToggle = document.getElementById('ttp-toggle-ranking');
   if (rankingToggle) rankingToggle.addEventListener('click', () => {
     APP_PREFS.set({ ranking_expandido: !APP_PREFS.get().ranking_expandido });
@@ -1737,8 +1778,8 @@ function renderFarmDashboard() {
 
     ${searchHTML('farm-search', 'Pesquisar username ou plataforma')}
 
-    <a class="recurso-link" href="#/farm/custos">
-      <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a1 1 0 0 1 1 1v1.06a5.5 5.5 0 0 1 4.44 4.44H18.5a1 1 0 1 1 0 2h-1.06a5.5 5.5 0 0 1-4.44 4.44V16a1 1 0 1 1-2 0v-1.06A5.5 5.5 0 0 1 6.56 10.5H5.5a1 1 0 1 1 0-2h1.06A5.5 5.5 0 0 1 11 4.06V3a1 1 0 0 1 1-1zm0 4a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM4 19a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1z"/></svg>Custos do mês</span>
+    <a class="recurso-link" href="#/farm/lotes">
+      <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>Lotes${ind.lotes ? ` (${ind.lotes})` : ''}</span>
       <span class="op-chevron">›</span>
     </a>
 
@@ -1873,10 +1914,6 @@ function renderFarmCadastro() {
         <input name="username" type="text" placeholder="@usuario" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Plataforma / tipo</label>
-        <input name="plataforma" type="text" placeholder="Instagram, TikTok, jogo…">
-      </div>
-      <div class="form-group">
         <label>Email</label>
         <div class="email-search">
           <input name="email" id="farm-email" type="email" placeholder="Digite para buscar na reserva" autocapitalize="none" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="farm-email-search-results">
@@ -1885,13 +1922,22 @@ function renderFarmCadastro() {
         <div class="field-hint" id="farm-email-search-hint">Digite pelo menos 2 caracteres para encontrar um email disponível.</div>
       </div>
       <div class="form-group">
-        <label>Senha</label>
-        <input name="senha" id="farm-senha" type="text" placeholder="Senha da conta" autocapitalize="none" autocomplete="off">
+        <label>Senha do email</label>
+        <input name="senha" id="farm-senha" type="text" placeholder="Senha do email" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Custo de aquisição (R$)</label>
-        <input name="custo_proprio" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
-        <div class="field-hint">Quanto você pagou pela conta em si.</div>
+        <label>Senha do TikTok</label>
+        <input name="senha_tiktok" type="text" placeholder="Senha da conta do TikTok" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Lote</label>
+        <div class="select-wrap">
+          <select name="lote_id">
+            <option value="">Sem lote</option>
+            ${DB.listarFarmLotes().map(l => `<option value="${esc(l.id)}">${esc(l.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field-hint">Vincule a conta a um lote existente para agrupar custo e faturamento.</div>
       </div>
       <div class="form-group">
         <label>Estágio</label>
@@ -1987,10 +2033,10 @@ function renderFarmCadastro() {
     try {
       const conta = DB.criarFarm({
         username: f.get('username'),
-        plataforma: f.get('plataforma'),
         email: f.get('email'),
         senha: f.get('senha'),
-        custo_proprio: f.get('custo_proprio'),
+        senha_tiktok: f.get('senha_tiktok'),
+        lote_id: f.get('lote_id') || null,
         status: f.get('status'),
         observacoes: f.get('observacoes'),
         email_reserva_id: emailReservaSelecionado ? emailReservaSelecionado.id : null,
@@ -2015,9 +2061,8 @@ function renderFarmDetalhes(id) {
     return;
   }
   const hist = DB.historicoDoFarm(id);
-  const vendida = c.preco_venda != null;
-  const custosMensaisDaConta = DB.custosMensaisAplicadosFarm(id)
-    .map(s => ({ valor: s.valor, rotulo: `${MESES_ABREV[s.mes]}/${s.ano}` }));
+  const vendida = c.status === 'Vendida';
+  const lote = c.lote_id ? DB.getFarmLote(c.lote_id) : null;
 
   $view.innerHTML = `
     <a class="back-link" href="#/farm/lista">
@@ -2037,28 +2082,32 @@ function renderFarmDetalhes(id) {
     <h2>Dados da conta</h2>
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Username</span><span class="v">@${esc(c.username.replace(/^@/, ''))} ${copyBtnHTML('username')}</span></div>
-      <div class="detail-row"><span class="k">Plataforma</span><span class="v">${esc(c.plataforma) || '—'}${c.plataforma ? ' ' + copyBtnHTML('plataforma') : ''}</span></div>
       <div class="detail-row"><span class="k">Email</span><span class="v">${esc(c.email) || '—'}${c.email ? ' ' + copyBtnHTML('email') : ''}</span></div>
       <div class="detail-row">
-        <span class="k">Senha</span>
+        <span class="k">Senha do email</span>
         <span class="v">
           <span id="senha-v">${c.senha ? '••••••••' : '—'}</span>
           ${c.senha ? '<button class="senha-toggle" id="senha-toggle">mostrar</button>' : ''}
           ${c.senha ? copyBtnHTML('senha') : ''}
         </span>
       </div>
+      <div class="detail-row">
+        <span class="k">Senha do TikTok</span>
+        <span class="v">
+          <span id="senhatt-v">${c.senha_tiktok ? '••••••••' : '—'}</span>
+          ${c.senha_tiktok ? '<button class="senha-toggle" id="senhatt-toggle">mostrar</button>' : ''}
+          ${c.senha_tiktok ? copyBtnHTML('senha_tiktok') : ''}
+        </span>
+      </div>
     </div>
 
-    <h2>Financeiro</h2>
+    <h2>Situação</h2>
     <div class="card detail-rows">
-      <div class="detail-row"><span class="k">Custo de aquisição</span><span class="v">${fmtBRL(c.custo_proprio || 0)}</span></div>
-      ${c.custo_recursos_legado > 0 ? `<div class="detail-row"><span class="k">Custo de recursos <span class="k-sub">(legado)</span></span><span class="v">${fmtBRL(c.custo_recursos_legado)}</span></div>` : ''}
-      ${custosMensaisDaConta.map(s => `<div class="detail-row"><span class="k">Custo do mês <span class="k-sub">(${esc(s.rotulo)})</span></span><span class="v">${fmtBRL(s.valor)}</span></div>`).join('')}
-      <div class="detail-row"><span class="k">Custo total</span><span class="v" style="font-weight:700;">${fmtBRL(c.custo)}</span></div>
+      <div class="detail-row"><span class="k">Lote</span><span class="v">${lote ? `<a href="#/farm/lote/${lote.id}">${esc(lote.nome)}</a>` : 'Sem lote'}</span></div>
+      <div class="detail-row"><span class="k">Estágio</span><span class="v"><span class="badge ${esc(badgeSlug(c.status))}">${esc(c.status)}</span></span></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
-      <div class="detail-row"><span class="k">Venda</span><span class="v">${vendida ? fmtBRL(c.preco_venda) : 'Não vendida'}</span></div>
+      <div class="detail-row"><span class="k">Vendida</span><span class="v">${vendida ? 'Sim' : 'Não'}</span></div>
       <div class="detail-row"><span class="k">Data da venda</span><span class="v">${fmtData(c.data_venda)}</span></div>
-      <div class="detail-row"><span class="k">Lucro</span><span class="v ${vendida ? lucroClass(c) : ''}">${fmtBRL(c.lucro)}</span></div>
     </div>
 
     ${c.observacoes ? `
@@ -2078,7 +2127,7 @@ function renderFarmDetalhes(id) {
     </div>
 
     <div style="margin-top:24px;">
-      ${!vendida ? `<a class="btn btn-success" href="#/farm/venda/${c.id}">Registrar venda</a>` : ''}
+      ${!vendida ? `<a class="btn btn-success" href="#/farm/venda/${c.id}">Marcar como vendida</a>` : ''}
       <a class="btn btn-secondary" href="#/farm/editar/${c.id}">Editar dados</a>
       ${vendida ? `<button class="btn btn-secondary" id="btn-cancelar-venda">Cancelar venda</button>` : ''}
       <button class="btn btn-danger-ghost" id="btn-excluir">Excluir conta</button>
@@ -2093,6 +2142,15 @@ function renderFarmDetalhes(id) {
       visivel = !visivel;
       document.getElementById('senha-v').textContent = visivel ? c.senha : '••••••••';
       $tg.textContent = visivel ? 'ocultar' : 'mostrar';
+    });
+  }
+  const $tgTt = document.getElementById('senhatt-toggle');
+  if ($tgTt) {
+    let visivel = false;
+    $tgTt.addEventListener('click', () => {
+      visivel = !visivel;
+      document.getElementById('senhatt-v').textContent = visivel ? c.senha_tiktok : '••••••••';
+      $tgTt.textContent = visivel ? 'ocultar' : 'mostrar';
     });
   }
 
@@ -2112,7 +2170,7 @@ function renderFarmDetalhes(id) {
   const $cancelar = document.getElementById('btn-cancelar-venda');
   if ($cancelar) {
     $cancelar.addEventListener('click', () => {
-      if (confirm(`Cancelar a venda de @${c.username.replace(/^@/, '')}? O lucro será zerado e a conta volta para "Crescendo".`)) {
+      if (confirm(`Cancelar a venda de @${c.username.replace(/^@/, '')}? A conta volta para "Crescendo".`)) {
         try {
           DB.cancelarVendaFarm(id);
           toast('Venda cancelada ✓');
@@ -2172,7 +2230,8 @@ function renderFarmDetalhes(id) {
 function renderFarmVenda(id) {
   const c = DB.getFarm(id);
   if (!c) { location.hash = '#/farm/lista'; return; }
-  if (c.preco_venda != null) { location.hash = '#/farm/conta/' + id; return; }
+  if (c.status === 'Vendida') { location.hash = '#/farm/conta/' + id; return; }
+  const lote = c.lote_id ? DB.getFarmLote(c.lote_id) : null;
 
   const hoje = new Date();
   const hojeStr = hoje.getFullYear() + '-' +
@@ -2185,15 +2244,11 @@ function renderFarmVenda(id) {
       Voltar
     </a>
     <div class="page-head">
-      <h1>Registrar venda</h1>
-      <div class="subtitle">@${esc(c.username.replace(/^@/, ''))} · custo de ${fmtBRL(c.custo)}</div>
+      <h1>Marcar como vendida</h1>
+      <div class="subtitle">@${esc(c.username.replace(/^@/, ''))}</div>
     </div>
 
     <form id="form-farm-venda" novalidate>
-      <div class="form-group">
-        <label>Valor da venda (R$) <span class="req">*</span></label>
-        <input name="preco_venda" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
-      </div>
       <div class="form-group">
         <label>Data da venda</label>
         <input name="data_venda" type="date" value="${hojeStr}">
@@ -2202,24 +2257,11 @@ function renderFarmVenda(id) {
         <label>Observações</label>
         <textarea name="observacoes" placeholder="Anotações sobre a venda"></textarea>
       </div>
-      <div class="card" style="margin-bottom:14px;">
-        <div class="detail-row" style="border:none;padding:4px 0;">
-          <span class="k">Lucro estimado</span>
-          <span class="v" id="lucro-preview">R$ 0,00</span>
-        </div>
-      </div>
+      <p class="recurso-hint">O faturamento e o lucro desta venda são lançados no ${lote ? esc(lote.nome) : 'lote da conta'}, na tela de Lotes.</p>
       <div class="form-error" id="form-error"></div>
-      <button class="btn btn-success" type="submit">Confirmar venda</button>
+      <button class="btn btn-success" type="submit">Confirmar</button>
     </form>
   `;
-
-  const $preco = document.querySelector('[name=preco_venda]');
-  const $preview = document.getElementById('lucro-preview');
-  $preco.addEventListener('input', () => {
-    const lucro = Number($preco.value || 0) - Number(c.custo || 0);
-    $preview.textContent = fmtBRL(lucro);
-    $preview.className = 'v ' + (lucro >= 0 ? 'pos' : 'neg');
-  });
 
   document.getElementById('form-farm-venda').addEventListener('submit', e => {
     e.preventDefault();
@@ -2232,11 +2274,10 @@ function renderFarmVenda(id) {
         dataVenda = new Date(a, m - 1, d, agora.getHours(), agora.getMinutes()).toISOString();
       }
       DB.registrarVendaFarm(id, {
-        preco_venda: f.get('preco_venda'),
         data_venda: dataVenda,
         observacoes: f.get('observacoes'),
       });
-      toast('Venda registrada ✓');
+      toast('Conta marcada como vendida ✓');
       location.hash = '#/farm/conta/' + id;
     } catch (err) {
       const $err = document.getElementById('form-error');
@@ -2340,27 +2381,26 @@ function renderEditarFarm(id) {
         <input name="username" type="text" value="${esc(c.username)}" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Plataforma / tipo</label>
-        <input name="plataforma" type="text" value="${esc(c.plataforma)}">
-      </div>
-      <div class="form-group">
         <label>Email</label>
         <input name="email" type="email" value="${esc(c.email)}" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Senha</label>
+        <label>Senha do email</label>
         <input name="senha" type="text" value="${esc(c.senha)}" autocapitalize="none" autocomplete="off">
       </div>
       <div class="form-group">
-        <label>Custo de aquisição (R$)</label>
-        <input name="custo_proprio" type="number" inputmode="decimal" step="0.01" min="0" value="${c.custo_proprio != null ? c.custo_proprio : c.custo}">
-        <div class="field-hint">Quanto você pagou pela conta em si.</div>
+        <label>Senha do TikTok</label>
+        <input name="senha_tiktok" type="text" value="${esc(c.senha_tiktok)}" autocapitalize="none" autocomplete="off">
       </div>
-      ${vendida ? `
       <div class="form-group">
-        <label>Valor da venda (R$)</label>
-        <input name="preco_venda" type="number" inputmode="decimal" step="0.01" min="0" value="${c.preco_venda}">
-      </div>` : ''}
+        <label>Lote</label>
+        <div class="select-wrap">
+          <select name="lote_id">
+            <option value="" ${!c.lote_id ? 'selected' : ''}>Sem lote</option>
+            ${DB.listarFarmLotes().map(l => `<option value="${esc(l.id)}" ${c.lote_id === l.id ? 'selected' : ''}>${esc(l.nome)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       <div class="form-group">
         <label>Observações</label>
         <textarea name="observacoes">${esc(c.observacoes)}</textarea>
@@ -2376,11 +2416,10 @@ function renderEditarFarm(id) {
     try {
       DB.atualizarFarm(id, {
         username: f.get('username'),
-        plataforma: f.get('plataforma'),
         email: f.get('email'),
         senha: f.get('senha'),
-        custo_proprio: f.get('custo_proprio'),
-        preco_venda: f.get('preco_venda'),
+        senha_tiktok: f.get('senha_tiktok'),
+        lote_id: f.get('lote_id') || null,
         observacoes: f.get('observacoes'),
       });
       toast('Alterações salvas ✓');
@@ -2662,32 +2701,29 @@ function renderOfertas(param) {
 }
 
 /* ============================================================
-   CUSTOS DO MÊS DO FARM  (#/farm/custos  ·  #/farm/custos/AAAA-MM)
+   LOTES DO FARM  (#/farm/lotes  ·  #/farm/lote/:id)
+   Custo total e faturamento agrupados por lote de contas.
    ============================================================ */
-function custoMesItemHTML(item) {
+function loteItemHTML(l) {
+  const r = DB.resumoLote(l);
   return `
-    <div class="detail-row" data-id="${item.id}">
-      <span class="k">${esc(item.nome) || 'Custo'}</span>
-      <span class="v">${fmtBRL(item.valor)} <button class="rr-del" data-id="${item.id}" aria-label="Excluir custo">✕</button></span>
-    </div>`;
+    <a class="conta-item" href="#/farm/lote/${l.id}">
+      <div class="avatar">L</div>
+      <div class="info">
+        <div class="username">${esc(l.nome)}</div>
+        <div class="meta">${r.contas} conta(s) · custo ${fmtBRL(r.custo)}</div>
+      </div>
+      <div class="fin">
+        <div class="lucro ${r.lucro >= 0 ? 'pos' : 'neg'}">${fmtBRL(r.lucro)}</div>
+        <div class="valores">Fat: ${fmtBRL(r.receita)}</div>
+      </div>
+    </a>`;
 }
 
-function renderFarmCustosMes(param) {
-  const agora = new Date();
-  let ano = agora.getFullYear(), mes = agora.getMonth();
-  if (param && /^\d{4}-\d{2}$/.test(param)) {
-    const [a, mm] = param.split('-').map(Number);
-    ano = a; mes = mm - 1;
-  }
-  const fmtParam = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-  const prevP = fmtParam(new Date(ano, mes - 1, 1));
-  const nextP = fmtParam(new Date(ano, mes + 1, 1));
-  const mesLabel = MESES_ABREV[mes] + '/' + ano;
-
-  const m = DB.getFarmCustosMes(ano, mes);
-  const fechado = !!(m && m.fechado);
-  const itens = m ? m.itens : [];
-  const preview = DB.previewFechamentoFarmCustosMes(ano, mes);
+function renderFarmLotes() {
+  const lotes = DB.listarFarmLotes();
+  const totalCusto = lotes.reduce((s, l) => s + DB.resumoLote(l).custo, 0);
+  const totalReceita = lotes.reduce((s, l) => s + DB.resumoLote(l).receita, 0);
 
   $view.innerHTML = `
     <a class="back-link" href="#/farm">
@@ -2695,121 +2731,236 @@ function renderFarmCustosMes(param) {
       Farm
     </a>
     <div class="page-head">
-      <h1>Custos do mês</h1>
-      <div class="subtitle">Dividido proporcionalmente aos dias que cada conta passou em Crescendo</div>
+      <div class="page-head-row">
+        <div><h1>Lotes</h1><div class="subtitle">Custo e faturamento por lote</div></div>
+        <button class="btn-small" id="btn-novo-lote">+ Novo lote</button>
+      </div>
     </div>
 
-    <div class="month-switch">
-      <a class="ms-arrow" href="#/farm/custos/${prevP}" aria-label="Mês anterior">‹</a>
-      <span class="ms-label">${mesLabel}</span>
-      <a class="ms-arrow" href="#/farm/custos/${nextP}" aria-label="Próximo mês">›</a>
+    <div class="stats-grid">
+      <div class="stat">
+        <div class="label">Lucro dos lotes</div>
+        <div class="value ${totalReceita - totalCusto >= 0 ? 'pos' : 'neg'}">${fmtBRL(totalReceita - totalCusto)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Custo total</div>
+        <div class="value">${fmtBRL(totalCusto)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Faturamento</div>
+        <div class="value">${fmtBRL(totalReceita)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Lotes</div>
+        <div class="value">${lotes.length}</div>
+      </div>
     </div>
 
-    ${fechado ? `
-      <div class="card detail-rows">
-        <div class="detail-row"><span class="k">Fechado em</span><span class="v">${fmtDataHora(m.fechado_em)}</span></div>
-        <div class="detail-row"><span class="k">Total dividido</span><span class="v" style="font-weight:700;">${fmtBRL(m.splits.reduce((s, x) => s + x.valor, 0))}</span></div>
-      </div>
-      <h2>Rateio congelado</h2>
-      <div class="card detail-rows">
-        ${m.splits.map(s => {
-          const f = DB.getFarm(s.farm_id);
-          return `<div class="detail-row"><span class="k">${f ? '@' + esc(f.username.replace(/^@/, '')) : '(conta removida)'} <span class="k-sub">${s.dias.toFixed(1)}d</span></span><span class="v">${fmtBRL(s.valor)}</span></div>`;
-        }).join('') || '<div class="detail-row"><span class="k">Nenhuma conta recebeu rateio.</span></div>'}
-      </div>
-      <div style="margin-top:24px;">
-        <button class="btn btn-danger-ghost" id="btn-reabrir-mes">Reabrir mês</button>
-      </div>
-      <p class="recurso-hint">Reabrir desfaz o rateio e devolve os lançamentos para edição. O custo (e o lucro de contas já vendidas) volta ao que era antes do fechamento.</p>
-    ` : `
-      <div class="section-row">
-        <h2>Lançamentos de ${mesLabel}</h2>
-        <button class="btn-small" id="btn-add-custo">+ Custo</button>
-      </div>
-      <div class="card" id="custos-lista">
-        ${itens.length
-          ? itens.map(custoMesItemHTML).join('')
-          : `<div class="empty" style="padding:24px;"><p>Nenhum custo lançado neste mês.</p></div>`}
-      </div>
-
-      <h2>Prévia do rateio</h2>
-      <div class="card detail-rows">
-        <div class="detail-row"><span class="k">Total lançado</span><span class="v" style="font-weight:700;">${fmtBRL(preview.total)}</span></div>
-        <div class="detail-row"><span class="k">No rateio</span><span class="v">${preview.porConta.length} conta(s) · ${preview.totalDias.toFixed(1)}d</span></div>
-        ${preview.totalDias > 0 ? `<div class="detail-row"><span class="k">Custo por dia de conta</span><span class="v">${fmtBRL(preview.total / preview.totalDias)}</span></div>` : ''}
-        ${preview.porConta.length
-          ? preview.porConta.map(x => `<div class="detail-row"><span class="k">@${esc(x.username.replace(/^@/, ''))} <span class="k-sub">${x.dias.toFixed(1)}d</span></span><span class="v">${fmtBRL(x.valor)}</span></div>`).join('')
-          : `<div class="detail-row"><span class="k">Nenhuma conta esteve em Crescendo neste mês.</span></div>`}
-      </div>
-
-      <div style="margin-top:24px;">
-        <button class="btn btn-primary" id="btn-fechar-mes" ${(!itens.length || preview.totalDias === 0) ? 'disabled' : ''}>Fechar mês</button>
-      </div>
-      ${itens.length && preview.totalDias === 0
-        ? `<p class="recurso-hint">Nenhuma conta está em "Crescendo" neste mês — não dá para fechar até haver ao menos uma.</p>` : ''}
-    `}
+    <h2>Seus lotes</h2>
+    <div class="conta-list">
+      ${lotes.length
+        ? lotes.map(loteItemHTML).join('')
+        : `<div class="card empty"><p>Nenhum lote ainda.<br>Toque em <strong>+ Novo lote</strong> para começar.</p></div>`}
+    </div>
   `;
 
-  if (fechado) {
-    document.getElementById('btn-reabrir-mes').addEventListener('click', () => {
-      if (!confirm(`Reabrir ${mesLabel}? O rateio congelado será apagado e os custos das contas voltam ao que eram antes do fechamento.`)) return;
-      DB.reabrirFarmCustosMes(ano, mes);
-      toast('Mês reaberto ✓');
-      renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
-    });
-    return;
-  }
-
-  document.getElementById('btn-add-custo').addEventListener('click', () => {
+  document.getElementById('btn-novo-lote').addEventListener('click', () => {
     openSheet(`
-      <h3>Lançar custo — ${mesLabel}</h3>
+      <h3>Novo lote</h3>
       <div class="form-group">
-        <label>Nome</label>
-        <input id="inp-custo-nome" type="text" placeholder="Ex.: Proxy Vivo, chip, ferramenta…">
-      </div>
-      <div class="form-group">
-        <label>Valor (R$)</label>
-        <input id="inp-custo-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+        <label>Nome do lote</label>
+        <input id="inp-lote-nome" type="text" placeholder="Ex.: Lote 1">
       </div>
       <div class="form-error" id="sheet-err"></div>
-      <button class="btn btn-primary" id="save-custo">Lançar</button>
-      <button class="btn btn-secondary" id="cancel-custo">Cancelar</button>
+      <button class="btn btn-primary" id="save-lote">Criar lote</button>
+      <button class="btn btn-secondary" id="cancel-lote">Cancelar</button>
     `, sheet => {
-      const nome = sheet.querySelector('#inp-custo-nome');
+      const nome = sheet.querySelector('#inp-lote-nome');
       setTimeout(() => nome.focus(), 50);
-      sheet.querySelector('#save-custo').addEventListener('click', () => {
+      sheet.querySelector('#save-lote').addEventListener('click', () => {
         try {
-          const valor = sheet.querySelector('#inp-custo-valor').value;
-          DB.adicionarFarmCustoMes(ano, mes, { nome: nome.value, valor });
+          const lote = DB.criarFarmLote({ nome: nome.value });
           closeSheet();
-          toast('Custo lançado ✓');
-          renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
+          toast('Lote criado ✓');
+          location.hash = '#/farm/lote/' + lote.id;
         } catch (err) {
           const e = sheet.querySelector('#sheet-err');
           e.textContent = err.message; e.classList.add('show');
         }
       });
-      sheet.querySelector('#cancel-custo').addEventListener('click', closeSheet);
+      sheet.querySelector('#cancel-lote').addEventListener('click', closeSheet);
+    });
+  });
+}
+
+function renderFarmLoteDetalhes(id) {
+  const l = DB.getFarmLote(id);
+  if (!l) {
+    $view.innerHTML = `<div class="card empty"><p>Lote não encontrado.</p></div>`;
+    return;
+  }
+  const r = DB.resumoLote(l);
+  const contas = DB.contasDoLote(id);
+  const receitas = [...l.receitas].sort((a, b) => String(b.data).localeCompare(String(a.data)));
+
+  $view.innerHTML = `
+    <a class="back-link" href="#/farm/lotes">
+      <svg viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+      Lotes
+    </a>
+    <div class="page-head">
+      <div class="page-head-row">
+        <div><h1>${esc(l.nome)}</h1><div class="subtitle">${contas.length} conta(s) no lote</div></div>
+        <button class="btn-small" id="btn-renomear-lote">Renomear</button>
+      </div>
+    </div>
+
+    <h2>Financeiro do lote</h2>
+    <div class="card detail-rows">
+      <div class="detail-row"><span class="k">Custo total</span><span class="v">${fmtBRL(r.custo)} <button class="senha-toggle" id="btn-custo-lote">${r.custo > 0 ? 'editar' : 'definir'}</button></span></div>
+      <div class="detail-row"><span class="k">Faturamento</span><span class="v">${fmtBRL(r.receita)}</span></div>
+      <div class="detail-row"><span class="k">Lucro do lote</span><span class="v ${r.lucro >= 0 ? 'pos' : 'neg'}" style="font-weight:700;">${fmtBRL(r.lucro)}</span></div>
+    </div>
+
+    <div class="section-row">
+      <h2>Faturamentos</h2>
+      <button class="btn-small" id="btn-add-receita">+ Faturamento</button>
+    </div>
+    <div class="card" id="receitas-lista">
+      ${receitas.length
+        ? receitas.map(rec => `
+          <div class="receita-row" data-id="${rec.id}">
+            <div class="rr-info">
+              <div class="rr-val">${fmtBRL(rec.valor)}</div>
+              <div class="rr-meta">${fmtData(rec.data)}${rec.descricao ? ' · ' + esc(rec.descricao) : ''}</div>
+            </div>
+            <button class="rr-del" data-id="${rec.id}" aria-label="Excluir faturamento">✕</button>
+          </div>`).join('')
+        : `<div class="empty" style="padding:24px;"><p>Nenhum faturamento lançado ainda.</p></div>`}
+    </div>
+
+    <h2>Contas do lote</h2>
+    <div class="card detail-rows">
+      ${contas.length
+        ? contas.map(c => `<div class="detail-row"><span class="k"><a href="#/farm/conta/${c.id}">@${esc(c.username.replace(/^@/, ''))}</a></span><span class="v"><span class="badge ${esc(badgeSlug(c.status))}">${esc(c.status)}</span></span></div>`).join('')
+        : '<div class="detail-row"><span class="k">Nenhuma conta vinculada. Vincule no cadastro ou na edição da conta.</span></div>'}
+    </div>
+
+    <div style="margin-top:24px;">
+      <button class="btn btn-danger-ghost" id="btn-excluir-lote">Excluir lote</button>
+    </div>
+    <p class="recurso-hint">Excluir o lote não apaga as contas — elas apenas ficam sem lote.</p>
+  `;
+
+  document.getElementById('btn-renomear-lote').addEventListener('click', () => {
+    openSheet(`
+      <h3>Renomear lote</h3>
+      <div class="form-group">
+        <label>Nome do lote</label>
+        <input id="inp-lote-nome" type="text" value="${esc(l.nome)}">
+      </div>
+      <div class="form-error" id="sheet-err"></div>
+      <button class="btn btn-primary" id="save-lote">Salvar</button>
+      <button class="btn btn-secondary" id="cancel-lote">Cancelar</button>
+    `, sheet => {
+      sheet.querySelector('#save-lote').addEventListener('click', () => {
+        try {
+          DB.renomearFarmLote(id, sheet.querySelector('#inp-lote-nome').value);
+          closeSheet(); toast('Lote renomeado ✓'); renderFarmLoteDetalhes(id);
+        } catch (err) {
+          const e = sheet.querySelector('#sheet-err');
+          e.textContent = err.message; e.classList.add('show');
+        }
+      });
+      sheet.querySelector('#cancel-lote').addEventListener('click', closeSheet);
     });
   });
 
-  document.getElementById('custos-lista').addEventListener('click', e => {
+  document.getElementById('btn-custo-lote').addEventListener('click', () => {
+    openSheet(`
+      <h3>Custo total do lote</h3>
+      <div class="form-group">
+        <label>Custo total (R$)</label>
+        <input id="inp-custo-lote" type="number" inputmode="decimal" step="0.01" min="0" value="${l.custo_total || ''}" placeholder="0,00">
+        <div class="field-hint">Quanto custou montar/aquecer todas as contas deste lote.</div>
+      </div>
+      <div class="form-error" id="sheet-err"></div>
+      <button class="btn btn-primary" id="save-custo-lote">Salvar</button>
+      <button class="btn btn-secondary" id="cancel-custo-lote">Cancelar</button>
+    `, sheet => {
+      const inp = sheet.querySelector('#inp-custo-lote');
+      setTimeout(() => inp.focus(), 50);
+      sheet.querySelector('#save-custo-lote').addEventListener('click', () => {
+        try {
+          DB.definirCustoLote(id, inp.value);
+          closeSheet(); toast('Custo salvo ✓'); renderFarmLoteDetalhes(id);
+        } catch (err) {
+          const e = sheet.querySelector('#sheet-err');
+          e.textContent = err.message; e.classList.add('show');
+        }
+      });
+      sheet.querySelector('#cancel-custo-lote').addEventListener('click', closeSheet);
+    });
+  });
+
+  document.getElementById('btn-add-receita').addEventListener('click', () => {
+    const hoje = new Date();
+    const hojeStr = hoje.getFullYear() + '-' + String(hoje.getMonth() + 1).padStart(2, '0') + '-' + String(hoje.getDate()).padStart(2, '0');
+    openSheet(`
+      <h3>Lançar faturamento</h3>
+      <div class="form-group">
+        <label>Valor (R$)</label>
+        <input id="inp-rec-valor" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0,00">
+      </div>
+      <div class="form-group">
+        <label>Data</label>
+        <input id="inp-rec-data" type="date" value="${hojeStr}">
+      </div>
+      <div class="form-group">
+        <label>Descrição (opcional)</label>
+        <input id="inp-rec-desc" type="text" placeholder="Ex.: venda de 3 contas">
+      </div>
+      <div class="form-error" id="sheet-err"></div>
+      <button class="btn btn-primary" id="save-rec">Lançar</button>
+      <button class="btn btn-secondary" id="cancel-rec">Cancelar</button>
+    `, sheet => {
+      const valor = sheet.querySelector('#inp-rec-valor');
+      setTimeout(() => valor.focus(), 50);
+      sheet.querySelector('#save-rec').addEventListener('click', () => {
+        try {
+          let dataRec = null;
+          const dv = sheet.querySelector('#inp-rec-data').value;
+          if (dv) {
+            const [a, m, d] = dv.split('-').map(Number);
+            const ag = new Date();
+            dataRec = new Date(a, m - 1, d, ag.getHours(), ag.getMinutes()).toISOString();
+          }
+          DB.adicionarReceitaLote(id, { valor: valor.value, data: dataRec, descricao: sheet.querySelector('#inp-rec-desc').value });
+          closeSheet(); toast('Faturamento lançado ✓'); renderFarmLoteDetalhes(id);
+        } catch (err) {
+          const e = sheet.querySelector('#sheet-err');
+          e.textContent = err.message; e.classList.add('show');
+        }
+      });
+      sheet.querySelector('#cancel-rec').addEventListener('click', closeSheet);
+    });
+  });
+
+  document.getElementById('receitas-lista').addEventListener('click', e => {
     const btn = e.target.closest('[data-id]');
     if (!btn) return;
-    if (!confirm('Excluir este lançamento?')) return;
+    if (!confirm('Excluir este faturamento?')) return;
     try {
-      DB.excluirFarmCustoMes(m.id, btn.dataset.id);
-      renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
+      DB.excluirReceitaLote(id, btn.dataset.id);
+      renderFarmLoteDetalhes(id);
     } catch (err) { toast(err.message); }
   });
 
-  document.getElementById('btn-fechar-mes').addEventListener('click', () => {
-    if (!confirm(`Fechar ${mesLabel}? O total de ${fmtBRL(preview.total)} será dividido entre ${preview.porConta.length} conta(s) e não poderá ser alterado depois.`)) return;
-    try {
-      DB.fecharFarmCustosMes(ano, mes);
-      toast('Mês fechado ✓');
-      renderFarmCustosMes(fmtParam(new Date(ano, mes, 1)));
-    } catch (err) { toast(err.message); }
+  document.getElementById('btn-excluir-lote').addEventListener('click', () => {
+    if (!confirm(`Excluir o ${l.nome}? As contas vinculadas ficam sem lote (não são apagadas).`)) return;
+    DB.excluirFarmLote(id);
+    toast('Lote excluído');
+    location.hash = '#/farm/lotes';
   });
 }
 

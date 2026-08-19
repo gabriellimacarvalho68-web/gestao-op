@@ -60,6 +60,10 @@ const DB = (() => {
     t.meta_seguidores = Number(t.meta_seguidores || 0);
     t.meta_notificadas = t.meta_notificadas && typeof t.meta_notificadas === 'object'
       ? t.meta_notificadas : {};
+    // Perfis marcados manualmente como "falharam a postagem" no dia atual.
+    t.falhas_postagem = t.falhas_postagem && typeof t.falhas_postagem === 'object'
+      ? t.falhas_postagem : { data: null, perfis: [] };
+    if (!Array.isArray(t.falhas_postagem.perfis)) t.falhas_postagem.perfis = [];
     t.atualizado_em = t.atualizado_em || null;
     t.custos.forEach(c => {
       if (!TTPOST_CUSTO_BASES.includes(c.base)) c.base = 'mensal_por_conta';
@@ -119,6 +123,7 @@ const DB = (() => {
         obj.farm_historico = obj.farm_historico || [];
         obj.farm_recursos = obj.farm_recursos || [];
         obj.farm_custos_mensais = obj.farm_custos_mensais || [];
+        obj.farm_lotes = obj.farm_lotes || [];
         obj.ofertas = obj.ofertas || [];
         obj.ofertas.forEach(o => {
           if (o.investimento_em == null) o.investimento_em = o.criado_em || null;
@@ -132,12 +137,19 @@ const DB = (() => {
         obj.farm.forEach(f => {
           if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
           if (!Array.isArray(f.recursos)) f.recursos = [];
+          if (f.lote_id === undefined) f.lote_id = null;
+          if (f.senha_tiktok == null) f.senha_tiktok = '';
+        });
+        // Garante que todo lote tenha as chaves esperadas (custo/faturamento)
+        obj.farm_lotes.forEach(l => {
+          l.custo_total = Number(l.custo_total || 0);
+          l.receitas = Array.isArray(l.receitas) ? l.receitas : [];
         });
         migrarCustoRecursosLegado(obj.farm, obj.farm_recursos);
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
+    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], farm_lotes: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
   }
 
   let data = load();
@@ -619,6 +631,29 @@ const DB = (() => {
     persist();
   }
 
+  // Perfis marcados manualmente como falha de postagem — só valem para o dia
+  // corrente; ao virar o dia a marcação some sozinha.
+  function hojeLocalStr() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+      '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function getFalhasPostagemHoje() {
+    const fp = data.ttpost.falhas_postagem;
+    if (!fp || fp.data !== hojeLocalStr()) return [];
+    return Array.isArray(fp.perfis) ? fp.perfis.slice() : [];
+  }
+
+  function definirFalhasPostagemHoje(perfis) {
+    data.ttpost.falhas_postagem = {
+      data: hojeLocalStr(),
+      perfis: Array.isArray(perfis) ? [...new Set(perfis.map(String))] : [],
+    };
+    persist();
+    return data.ttpost.falhas_postagem.perfis.slice();
+  }
+
   function listarEstoquesTtpost() {
     return [...data.ttpost.estoques].sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   }
@@ -862,7 +897,7 @@ const DB = (() => {
     return data.farm.find(f => f.id === id) || null;
   }
 
-  function criarFarm({ username, plataforma, email, senha, custo_proprio, custo, status, observacoes, data_inicio, recursos, email_reserva_id }) {
+  function criarFarm({ username, plataforma, email, senha, senha_tiktok, custo_proprio, custo, status, observacoes, data_inicio, recursos, email_reserva_id, lote_id }) {
     username = String(username || '').trim();
     plataforma = String(plataforma || '').trim();
     if (!username) throw new Error('Username é obrigatório.');
@@ -881,12 +916,21 @@ const DB = (() => {
       senha = emailReserva.senha;
     }
 
+    // Vínculo opcional a um lote existente
+    let loteVinculado = null;
+    if (lote_id) {
+      loteVinculado = data.farm_lotes.find(l => l.id === lote_id);
+      if (!loteVinculado) throw new Error('O lote selecionado não existe mais.');
+    }
+
     const f = {
       id: uuid(),
       username,
       plataforma,
       email: String(email || '').trim(),
       senha: String(senha || ''),
+      senha_tiktok: String(senha_tiktok || ''),
+      lote_id: loteVinculado ? loteVinculado.id : null,
       custo_proprio: proprio == null || proprio === '' ? 0 : Number(proprio),
       recursos: Array.isArray(recursos) ? recursos.slice() : [],
       custo: 0, // calculado abaixo
@@ -905,9 +949,9 @@ const DB = (() => {
       emailReserva.usado_em = now();
     }
     recalcularCustosFarm(); // define f.custo e redivide recursos entre as contas
-    addFarmHistorico(f.id, 'Conta criada', `Conta @${f.username} adicionada ao farm${f.plataforma ? ' — ' + f.plataforma : ''}.`);
-    if (f.custo > 0) {
-      addFarmHistorico(f.id, 'Custo registrado', `Custo inicial de ${fmtBRL(f.custo)}.`);
+    addFarmHistorico(f.id, 'Conta criada', `Conta @${f.username} adicionada ao farm.`);
+    if (loteVinculado) {
+      addFarmHistorico(f.id, 'Vinculada a lote', `Conta adicionada ao ${loteVinculado.nome}.`);
     }
     persist();
     return f;
@@ -923,12 +967,24 @@ const DB = (() => {
       if (farmUsernameExiste(u, id)) throw new Error('Já existe uma conta em farm com esse username.');
       if (u !== f.username) { f.username = u; mudou = true; }
     }
-    ['plataforma', 'email', 'senha', 'observacoes'].forEach(k => {
+    ['plataforma', 'email', 'senha', 'senha_tiktok', 'observacoes'].forEach(k => {
       if (campos[k] != null) {
         const v = String(campos[k]).trim();
-        if (v !== f[k]) { f[k] = v; mudou = true; }
+        if (v !== (f[k] || '')) { f[k] = v; mudou = true; }
       }
     });
+    // Vínculo a lote (aceita '' / null para desvincular)
+    if (campos.lote_id !== undefined) {
+      const novoLote = campos.lote_id || null;
+      if (novoLote && !data.farm_lotes.find(l => l.id === novoLote))
+        throw new Error('O lote selecionado não existe mais.');
+      if (novoLote !== (f.lote_id || null)) {
+        f.lote_id = novoLote;
+        mudou = true;
+        const l = novoLote ? data.farm_lotes.find(x => x.id === novoLote) : null;
+        addFarmHistorico(id, 'Lote alterado', l ? `Vinculada ao ${l.nome}.` : 'Desvinculada do lote.');
+      }
+    }
     // Custo próprio (aquisição). Aceita 'custo' como alias legado. Vazio = 0.
     if (campos.custo_proprio != null || campos.custo != null) {
       const raw = campos.custo_proprio != null ? campos.custo_proprio : campos.custo;
@@ -972,15 +1028,16 @@ const DB = (() => {
     return f;
   }
 
-  // Uma única venda; lucro = venda − custo
-  function registrarVendaFarm(id, { preco_venda, data_venda, observacoes }) {
+  // Marca a conta como vendida. O dinheiro (faturamento/lucro) vive nos lotes,
+  // então aqui só registramos status Vendida + data. preco_venda continua
+  // aceito como opcional para retrocompatibilidade (backups e testes antigos).
+  function registrarVendaFarm(id, { preco_venda, data_venda, observacoes } = {}) {
     const f = getFarm(id);
     if (!f) throw new Error('Conta não encontrada.');
-    if (f.preco_venda != null) throw new Error('Esta conta já foi vendida.');
-    if (preco_venda == null || preco_venda === '' || isNaN(Number(preco_venda)))
-      throw new Error('Valor da venda é obrigatório.');
-
-    f.preco_venda = Number(preco_venda);
+    if (f.status === 'Vendida') throw new Error('Esta conta já foi vendida.');
+    if (preco_venda != null && preco_venda !== '' && !isNaN(Number(preco_venda))) {
+      f.preco_venda = Number(preco_venda);
+    }
     f.data_venda = data_venda || now();
     f.atualizado_em = now();
     const anterior = f.status;
@@ -992,7 +1049,9 @@ const DB = (() => {
     // TTpost consumirá para retirar a conta de presets/aquecimentos futuros.
     desativarContaTtpostPorFarm(id, 'Conta vendida no Farm', f.data_venda);
     recalcularCustosFarm();
-    let desc = `Venda de ${fmtBRL(f.preco_venda)} — lucro de ${fmtBRL(f.lucro)}.`;
+    let desc = f.preco_venda != null
+      ? `Venda de ${fmtBRL(f.preco_venda)}.`
+      : `Conta marcada como vendida em ${fmtData(f.data_venda)}.`;
     if (observacoes && observacoes.trim()) desc += ` Obs.: ${observacoes.trim()}`;
     addFarmHistorico(id, 'Venda registrada', desc);
     persist();
@@ -1003,15 +1062,14 @@ const DB = (() => {
   function cancelarVendaFarm(id) {
     const f = getFarm(id);
     if (!f) throw new Error('Conta não encontrada.');
-    if (f.preco_venda == null) throw new Error('Esta conta não está vendida.');
-    const valorAnterior = f.preco_venda;
+    if (f.status !== 'Vendida') throw new Error('Esta conta não está vendida.');
     const statusAnterior = f.status;
     f.preco_venda = null;
     f.data_venda = null;
     f.lucro = 0;
     f.status = 'Crescendo';
     f.atualizado_em = now();
-    addFarmHistorico(id, 'Venda cancelada', `Venda de ${fmtBRL(valorAnterior)} desfeita.`);
+    addFarmHistorico(id, 'Venda cancelada', 'A conta voltou para Crescendo.');
     if (statusAnterior !== 'Crescendo') {
       addFarmHistorico(id, 'Estágio alterado para Crescendo', `De ${statusAnterior} para Crescendo.`);
     }
@@ -1060,13 +1118,17 @@ const DB = (() => {
       .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
   }
 
+  // O financeiro do Farm agora vive nos lotes: custo = soma dos custos totais
+  // dos lotes; receita = soma dos faturamentos lançados; lucro do farm = soma
+  // do lucro/prejuízo de todos os lotes.
   function indicadoresFarm() {
     const farm = data.farm;
-    const vendidas = farm.filter(f => f.preco_venda != null);
+    const vendidas = farm.filter(f => f.status === 'Vendida');
     const ativas = farm.filter(f => f.status !== 'Vendida');
-    const investido = farm.reduce((s, f) => s + Number(f.custo || 0), 0);
-    const receita = vendidas.reduce((s, f) => s + Number(f.preco_venda || 0), 0);
-    const lucro = vendidas.reduce((s, f) => s + Number(f.lucro || 0), 0);
+    const investido = data.farm_lotes.reduce((s, l) => s + Number(l.custo_total || 0), 0);
+    const receita = data.farm_lotes.reduce((s, l) =>
+      s + l.receitas.reduce((t, r) => t + Number(r.valor || 0), 0), 0);
+    const lucro = receita - investido;
 
     const porEstagio = {};
     FARM_STATUS.forEach(s => { porEstagio[s] = 0; });
@@ -1076,11 +1138,104 @@ const DB = (() => {
       total: farm.length,
       ativas: ativas.length,
       vendidas: vendidas.length,
+      lotes: data.farm_lotes.length,
       investido,
       receita,
       lucro,
       porEstagio,
     };
+  }
+
+  // ============================================================
+  //   LOTES DO FARM — custo total e faturamento por lote
+  //   lote = { id, nome, custo_total, receitas:[{id,valor,data,descricao}] }
+  //   lucro do lote = soma dos faturamentos − custo total.
+  // ============================================================
+  function listarFarmLotes() {
+    return [...data.farm_lotes].sort((a, b) =>
+      String(b.criado_em || '').localeCompare(String(a.criado_em || '')));
+  }
+
+  function getFarmLote(id) {
+    return data.farm_lotes.find(l => l.id === id) || null;
+  }
+
+  function contasDoLote(loteId) {
+    return data.farm
+      .filter(f => f.lote_id === loteId)
+      .sort((a, b) => String(a.criado_em).localeCompare(String(b.criado_em)));
+  }
+
+  // Números do lote: custo, faturamento e lucro/prejuízo.
+  function resumoLote(lote) {
+    const l = typeof lote === 'string' ? getFarmLote(lote) : lote;
+    if (!l) return { custo: 0, receita: 0, lucro: 0, contas: 0 };
+    const receita = l.receitas.reduce((s, r) => s + Number(r.valor || 0), 0);
+    const custo = Number(l.custo_total || 0);
+    return { custo, receita, lucro: receita - custo, contas: contasDoLote(l.id).length };
+  }
+
+  function criarFarmLote({ nome } = {}) {
+    const lote = {
+      id: uuid(),
+      nome: String(nome || '').trim() || `Lote ${data.farm_lotes.length + 1}`,
+      custo_total: 0,
+      receitas: [],
+      criado_em: now(),
+    };
+    data.farm_lotes.push(lote);
+    persist();
+    return lote;
+  }
+
+  function renomearFarmLote(id, nome) {
+    const l = getFarmLote(id);
+    if (!l) throw new Error('Lote não encontrado.');
+    const n = String(nome || '').trim();
+    if (!n) throw new Error('Dê um nome ao lote.');
+    l.nome = n;
+    persist();
+    return l;
+  }
+
+  function definirCustoLote(id, custo) {
+    const l = getFarmLote(id);
+    if (!l) throw new Error('Lote não encontrado.');
+    const v = (custo === '' || custo == null) ? 0 : Number(custo);
+    if (isNaN(v) || v < 0) throw new Error('Informe um custo válido.');
+    l.custo_total = v;
+    persist();
+    return l;
+  }
+
+  function adicionarReceitaLote(id, { valor, data: dataReceita, descricao } = {}) {
+    const l = getFarmLote(id);
+    if (!l) throw new Error('Lote não encontrado.');
+    if (valor == null || valor === '' || isNaN(Number(valor)) || Number(valor) < 0)
+      throw new Error('Informe um valor de faturamento válido.');
+    const r = {
+      id: uuid(),
+      valor: Number(valor),
+      data: dataReceita || now(),
+      descricao: String(descricao || '').trim(),
+    };
+    l.receitas.push(r);
+    persist();
+    return r;
+  }
+
+  function excluirReceitaLote(loteId, receitaId) {
+    const l = getFarmLote(loteId);
+    if (!l) throw new Error('Lote não encontrado.');
+    l.receitas = l.receitas.filter(r => r.id !== receitaId);
+    persist();
+  }
+
+  // Ao excluir o lote, as contas apenas ficam sem lote (não são apagadas).
+  function excluirFarmLote(id) {
+    data.farm.forEach(f => { if (f.lote_id === id) f.lote_id = null; });
+    data.farm_lotes = data.farm_lotes.filter(l => l.id !== id);
+    persist();
   }
 
   // ============================================================
@@ -1316,20 +1471,23 @@ const DB = (() => {
     };
   }
 
+  // Financeiro por lote: custo do lote entra no período pela sua data de
+  // criação; cada faturamento entra pela sua própria data.
   function resumoFarm(periodo) {
     const desde = inicioPeriodo(periodo);
-    const desdeISO = desde ? desde.toISOString() : null;
-    const noRange = iso => !desdeISO || (iso && iso >= desdeISO);
-    const vendidas = data.farm.filter(f => f.preco_venda != null && noRange(f.data_venda));
-    const investimento = vendidas.reduce((s, f) => s + Number(f.custo || 0), 0);
-    const receita = vendidas.reduce((s, f) => s + Number(f.preco_venda || 0), 0);
-    const emFarmLista = data.farm.filter(f => f.preco_venda == null);
-    const capitalFarm = emFarmLista.reduce((s, f) => s + Number(f.custo || 0), 0);
+    const noRange = iso => !desde || (iso && new Date(iso) >= desde);
+    let receita = 0, investimento = 0;
+    data.farm_lotes.forEach(l => {
+      if (noRange(l.criado_em)) investimento += Number(l.custo_total || 0);
+      l.receitas.forEach(r => { if (noRange(r.data)) receita += Number(r.valor || 0); });
+    });
+    const emFarmLista = data.farm.filter(f => f.status !== 'Vendida');
+    const vendidas = data.farm.filter(f => f.status === 'Vendida' && noRange(f.data_venda));
     return {
       id: 'farm', nome: 'Farm', rota: '#/farm',
       receita, investimento, lucro: receita - investimento, roi: roiDe(receita, investimento),
       ativas: emFarmLista.length, concluidas: vendidas.length,
-      extra: { emFarm: emFarmLista.length, capitalFarm, vendidas: vendidas.length },
+      extra: { emFarm: emFarmLista.length, lotes: data.farm_lotes.length, vendidas: vendidas.length },
     };
   }
 
@@ -1409,11 +1567,17 @@ const DB = (() => {
       const b = bucket(d.getFullYear(), d.getMonth());
       if (b) b.compraVenda += Number(c.preco_venda || 0) - Number(c.preco_compra || 0);
     });
-    data.farm.forEach(f => {
-      if (f.preco_venda == null || !f.data_venda) return;
-      const d = new Date(f.data_venda);
-      const b = bucket(d.getFullYear(), d.getMonth());
-      if (b) b.farm += Number(f.preco_venda || 0) - Number(f.custo || 0);
+    // Farm por lotes: custo lançado no mês de criação do lote; faturamentos no
+    // mês de cada lançamento.
+    data.farm_lotes.forEach(l => {
+      const dc = new Date(l.criado_em);
+      const bc = bucket(dc.getFullYear(), dc.getMonth());
+      if (bc) bc.farm -= Number(l.custo_total || 0);
+      l.receitas.forEach(r => {
+        const d = new Date(r.data);
+        const b = bucket(d.getFullYear(), d.getMonth());
+        if (b) b.farm += Number(r.valor || 0);
+      });
     });
     data.ofertas.forEach(o => {
       const b = bucket(o.ano, o.mes);
@@ -1492,7 +1656,7 @@ const DB = (() => {
   function exportar() {
     return JSON.stringify({
       app: 'gestao-op',
-      versao: 10,
+      versao: 11,
       exportado_em: now(),
       meta_anual: data.meta_anual,
       emails: data.emails,
@@ -1502,6 +1666,7 @@ const DB = (() => {
       farm_historico: data.farm_historico,
       farm_recursos: data.farm_recursos,
       farm_custos_mensais: data.farm_custos_mensais,
+      farm_lotes: data.farm_lotes,
       ofertas: data.ofertas,
       ofertas_historico: data.ofertas_historico,
       ofertas_grupos: data.ofertas_grupos,
@@ -1523,6 +1688,11 @@ const DB = (() => {
     const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
     const farmRecursos = Array.isArray(obj.farm_recursos) ? obj.farm_recursos : [];
     const farmCustosMensais = Array.isArray(obj.farm_custos_mensais) ? obj.farm_custos_mensais : [];
+    const farmLotes = Array.isArray(obj.farm_lotes) ? obj.farm_lotes : [];
+    farmLotes.forEach(l => {
+      l.custo_total = Number(l.custo_total || 0);
+      l.receitas = Array.isArray(l.receitas) ? l.receitas : [];
+    });
     if (farm.some(f => !f.id || !f.username))
       throw new Error('Backup corrompido: farm sem id/username.');
     const ofertas = Array.isArray(obj.ofertas) ? obj.ofertas : [];
@@ -1538,11 +1708,14 @@ const DB = (() => {
     farm.forEach(f => {
       if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
       if (!Array.isArray(f.recursos)) f.recursos = [];
+      if (f.lote_id === undefined) f.lote_id = null;
+      if (f.senha_tiktok == null) f.senha_tiktok = '';
     });
     migrarCustoRecursosLegado(farm, farmRecursos);
     data = {
       contas: obj.contas, historico: obj.historico,
       farm, farm_historico: farmHist, farm_recursos: farmRecursos, farm_custos_mensais: farmCustosMensais,
+      farm_lotes: farmLotes,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
       emails: Array.isArray(obj.emails) ? obj.emails : [],
       ttpost,
@@ -1579,6 +1752,8 @@ const DB = (() => {
     diasCrescendoNoMes, getFarmCustosMes, adicionarFarmCustoMes, excluirFarmCustoMes,
     previewFechamentoFarmCustosMes, fecharFarmCustosMes, reabrirFarmCustosMes,
     custosMensaisAplicadosFarm, zerarCustosFarmCrescendo,
+    listarFarmLotes, getFarmLote, contasDoLote, resumoLote, criarFarmLote,
+    renomearFarmLote, definirCustoLote, adicionarReceitaLote, excluirReceitaLote, excluirFarmLote,
     listarGruposOferta, criarGrupoOferta, renomearGrupoOferta, excluirGrupoOferta,
     getOfertaMes, getOfertaMesId, definirInvestimentoMes, adicionarReceitaOferta,
     excluirReceitaOferta, historicoDasOfertas, totalReceitasMes,
@@ -1590,6 +1765,7 @@ const DB = (() => {
     listarContasTtpost, salvarContaTtpost, excluirContaTtpost, rankingTtpost,
     getMetaSeguidoresTtpost, setMetaSeguidoresTtpost,
     metaTtpostJaNotificada, marcarMetaTtpostNotificada,
+    getFalhasPostagemHoje, definirFalhasPostagemHoje,
     listarEstoquesTtpost, salvarEstoqueTtpost, excluirEstoqueTtpost,
     resumoTtpost, detalharCustoTtpostFarm, custoOperacionalTtpostFarm,
     exportar, importar, totais,

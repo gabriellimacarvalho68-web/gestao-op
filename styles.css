@@ -96,6 +96,20 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 .stat.wide { grid-column: 1 / -1; }
 .stat.wide .value { font-size: 30px; }
 .stat .sub { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+/* Stat clicável (ex.: Posts hoje → marcar falhas) — botão com cara de card */
+button.stat-clicavel {
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  border: 1px solid transparent; width: 100%; display: block;
+  -webkit-appearance: none; appearance: none;
+  transition: border-color .15s ease, transform .05s ease;
+}
+button.stat-clicavel:hover { border-color: var(--primary); }
+button.stat-clicavel:active { transform: scale(0.985); }
+button.stat-clicavel .sub { color: var(--primary); font-weight: 600; }
+/* Marcação de falhas de postagem */
+.ttp-falha-opt.marcada { background: var(--danger-bg, rgba(255,59,48,.10)); }
+.ttp-falha-opt.marcada .check { color: var(--danger); }
+.ttp-falha-opt small { display: block; color: var(--ink-3); font-size: 12px; }
 
 /* ---------- Barra de pesquisa ---------- */
 .search {
@@ -678,7 +692,8 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
 /* ============================================================
    TTpost — operação, ranking, estoque e custos livres
    ============================================================ */
-.ttp-head-actions { display: flex; align-items: center; gap: 7px; }
+.ttp-head-row { flex-wrap: nowrap; }
+.ttp-head-actions { display: flex; align-items: center; gap: 7px; flex: none; }
 .ttp-status {
   display: flex; align-items: center; gap: 10px;
   background: #EAF3FF; color: #0060C9;
@@ -767,7 +782,6 @@ h2 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; color: var(--ink
   .email-item { flex-direction: column; align-items: stretch; }
   .ei-actions { width: 100%; flex-direction: row; align-items: center; justify-content: flex-end; }
   .ei-actions .btn-mini { flex: 1; min-width: 0; }
-  .page-head-row > .ttp-head-actions { width: 100%; justify-content: flex-end; }
   .ttp-head-actions .btn-small { padding-left: 13px; padding-right: 13px; }
 }
 

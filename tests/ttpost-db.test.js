@@ -64,7 +64,7 @@ assert.strictEqual(contaVendida.active, false);
 assert.strictEqual(DB.resumoTtpost().comandosPendentes, 1);
 
 const backup = JSON.parse(DB.exportar());
-assert.strictEqual(backup.versao, 10);
+assert.strictEqual(backup.versao, 11);
 assert.strictEqual(backup.ttpost.custos.length, 4);
 DB.importar(JSON.stringify(backup));
 assert.strictEqual(DB.totais().ttpostContas, 2);
