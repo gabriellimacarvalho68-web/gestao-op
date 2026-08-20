@@ -1124,6 +1124,47 @@ const DB = (() => {
     return data.farm_custos_fixos.reduce((s, c) => s + Number(c.valor || 0), 0);
   }
 
+  // Custos fixos aplicáveis a UM mês: cada custo vale do mês em que foi criado
+  // até o mês corrente (não retroage antes da criação nem cobra o futuro).
+  function custosFixosDoMes(ano, mes) {
+    const agora = new Date();
+    const alvo = new Date(ano, mes, 1).getTime();
+    const inicioMesAtual = new Date(agora.getFullYear(), agora.getMonth(), 1).getTime();
+    if (alvo > inicioMesAtual) return 0;
+    return data.farm_custos_fixos.reduce((s, c) => {
+      const cri = new Date(c.criado_em || 0);
+      const inicioCri = new Date(cri.getFullYear(), cri.getMonth(), 1).getTime();
+      return s + (alvo >= inicioCri ? Number(c.valor || 0) : 0);
+    }, 0);
+  }
+
+  // Soma dos custos fixos aplicáveis a todos os meses cobertos por um período.
+  // 'hoje' não cobra overhead mensal (é uma janela de um dia); 'tudo' começa no
+  // mês do custo fixo mais antigo. Usado para o dashboard geral bater com a
+  // tela do Farm.
+  function custosFixosNoPeriodo(periodo) {
+    if (periodo === 'hoje' || !data.farm_custos_fixos.length) return 0;
+    const agora = new Date();
+    const fimAno = agora.getFullYear(), fimMes = agora.getMonth();
+    const desde = inicioPeriodo(periodo);
+    let ano, mes;
+    if (desde) { ano = desde.getFullYear(); mes = desde.getMonth(); }
+    else {
+      const maisAntigo = data.farm_custos_fixos.reduce((min, c) => {
+        const t = new Date(c.criado_em || 0).getTime();
+        return t < min ? t : min;
+      }, Infinity);
+      const d = new Date(Number.isFinite(maisAntigo) ? maisAntigo : agora.getTime());
+      ano = d.getFullYear(); mes = d.getMonth();
+    }
+    let total = 0;
+    while (ano < fimAno || (ano === fimAno && mes <= fimMes)) {
+      total += custosFixosDoMes(ano, mes);
+      mes++; if (mes > 11) { mes = 0; ano++; }
+    }
+    return total;
+  }
+
   // Financeiro do Farm calculado POR MÊS (mês corrente por padrão) — zera
   // sozinho ao virar o mês, porque tudo é filtrado por new Date().
   //   receita  = faturamentos dos lotes lançados no mês
@@ -1148,7 +1189,7 @@ const DB = (() => {
     const custoLotes = data.farm_lotes
       .filter(l => noMes(l.criado_em))
       .reduce((s, l) => s + Number(l.custo_total || 0), 0);
-    const custosFixos = totalFarmCustosFixosMensal();
+    const custosFixos = custosFixosDoMes(ano, mes);
     const investido = custoLotes + custosFixos;
     const lucro = receita - investido;
 
@@ -1543,6 +1584,9 @@ const DB = (() => {
       if (noRange(l.criado_em)) investimento += Number(l.custo_total || 0);
       l.receitas.forEach(r => { if (noRange(r.data)) receita += Number(r.valor || 0); });
     });
+    // Custos fixos recorrentes entram por mês coberto no período (igual à tela
+    // do Farm), para o dashboard geral refletir o prejuízo real.
+    investimento += custosFixosNoPeriodo(periodo);
     const emFarmLista = data.farm.filter(f => f.status !== 'Vendida');
     const vendidas = data.farm.filter(f => f.status === 'Vendida' && noRange(f.data_venda));
     return {
@@ -1641,6 +1685,8 @@ const DB = (() => {
         if (b) b.farm += Number(r.valor || 0);
       });
     });
+    // Custos fixos recorrentes descontam de cada mês do gráfico.
+    meses.forEach(m => { m.farm -= custosFixosDoMes(m.ano, m.mes); });
     data.ofertas.forEach(o => {
       const b = bucket(o.ano, o.mes);
       if (b) b.ofertas += totalReceitasMes(o) - Number(o.investimento || 0);

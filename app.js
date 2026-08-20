@@ -1777,7 +1777,7 @@ function renderFarmDashboard() {
       </div>
     </div>
 
-    ${searchHTML('farm-search', 'Pesquisar username ou plataforma')}
+    ${searchHTML('farm-search', 'Pesquisar username')}
 
     <a class="recurso-link" href="#/farm/lotes">
       <span class="rl-left"><svg class="rl-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z"/></svg>Lotes${ind.lotes ? ` (${ind.lotes})` : ''}</span>
@@ -1860,7 +1860,7 @@ function renderFarmLista() {
     <div class="page-head">
       <h1>Contas em farm</h1>
     </div>
-    ${searchHTML('farm-lista-search', 'Pesquisar username ou plataforma')}
+    ${searchHTML('farm-lista-search', 'Pesquisar username')}
     <div class="chips" id="farm-chips">
       ${statusList.map(s => `<button class="chip ${farmListaState.status === s ? 'active' : ''}" data-status="${esc(s)}">${esc(s)}</button>`).join('')}
     </div>
@@ -1870,8 +1870,6 @@ function renderFarmLista() {
         <select id="farm-ordenar">
           <option value="recente">Mais recente</option>
           <option value="antiga">Mais antiga</option>
-          <option value="maior-lucro">Maior lucro</option>
-          <option value="menor-lucro">Menor lucro</option>
         </select>
       </label>
     </div>
@@ -2205,8 +2203,8 @@ function renderFarmDetalhes(id) {
       sheet.querySelectorAll('.opt').forEach(btn => {
         btn.addEventListener('click', () => {
           const novo = btn.dataset.status;
-          // "Vendida" precisa de valor: encaminha para a tela de venda
-          if (novo === 'Vendida' && c.preco_venda == null) {
+          // "Vendida" passa pela tela de venda para capturar a data.
+          if (novo === 'Vendida' && c.status !== 'Vendida') {
             closeSheet();
             location.hash = '#/farm/venda/' + id;
             return;
@@ -2375,7 +2373,6 @@ function renderEditarConta(id) {
 function renderEditarFarm(id) {
   const c = DB.getFarm(id);
   if (!c) { location.hash = '#/farm/lista'; return; }
-  const vendida = c.preco_venda != null;
 
   $view.innerHTML = `
     <a class="back-link" href="#/farm/conta/${id}">
