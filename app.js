@@ -1432,18 +1432,20 @@ function ttpostFalhasSheet(ranking) {
 
   openSheet(`
     <h3>Falhas de postagem — hoje</h3>
-    <div class="field-hint ttp-sheet-hint">Marque os perfis que <b>não</b> conseguiram postar hoje. A marcação vale só para hoje e some sozinha amanhã.</div>
-    ${perfis.length ? `
-      <div class="opts ttp-falhas-lista">
-        ${perfis.map(p => `
-          <button type="button" class="opt ttp-falha-opt ${marcadas.has(p.key) ? 'marcada' : ''}" data-key="${esc(p.key)}">
-            <span><strong>${esc(p.nome)}</strong>${p.provider ? `<small>${esc(p.provider)}</small>` : ''}</span>
-            <span class="check">${marcadas.has(p.key) ? '✓' : ''}</span>
-          </button>`).join('')}
-      </div>` : '<div class="card ttp-compact-empty">Nenhum perfil disponível para marcar ainda.</div>'}
-    <div class="form-error" id="ttp-falhas-err"></div>
-    <button class="btn btn-primary" id="ttp-save-falhas">Salvar falhas</button>
-    <button class="btn btn-secondary" id="ttp-cancel-falhas">Cancelar</button>
+    <div class="sheet-scroll">
+      <div class="field-hint ttp-sheet-hint">Marque os perfis que <b>não</b> conseguiram postar hoje. A marcação vale só para hoje e some sozinha amanhã.</div>
+      ${perfis.length ? `
+        <div class="opts ttp-falhas-lista">
+          ${perfis.map(p => `
+            <button type="button" class="opt ttp-falha-opt ${marcadas.has(p.key) ? 'marcada' : ''}" data-key="${esc(p.key)}">
+              <span><strong>${esc(p.nome)}</strong>${p.provider ? `<small>${esc(p.provider)}</small>` : ''}</span>
+              <span class="check">${marcadas.has(p.key) ? '✓' : ''}</span>
+            </button>`).join('')}
+        </div>` : '<div class="card ttp-compact-empty">Nenhum perfil disponível para marcar ainda.</div>'}
+      <div class="form-error" id="ttp-falhas-err"></div>
+      <button class="btn btn-primary" id="ttp-save-falhas">Salvar falhas</button>
+      <button class="btn btn-secondary" id="ttp-cancel-falhas">Cancelar</button>
+    </div>
   `, sheet => {
     sheet.querySelectorAll('.ttp-falha-opt').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1474,18 +1476,20 @@ function ttpostOcultarSheet(rankingCompleto) {
 
   openSheet(`
     <h3>Ocultar contas do ranking</h3>
-    <div class="field-hint ttp-sheet-hint">Marque as contas que <b>não</b> devem aparecer no ranking de seguidores. Elas continuam salvas e podem ser reexibidas aqui a qualquer momento.</div>
-    ${perfis.length ? `
-      <div class="opts ttp-falhas-lista">
-        ${perfis.map(p => `
-          <button type="button" class="opt ttp-ocultar-opt ${ocultas.has(p.key) ? 'marcada' : ''}" data-key="${esc(p.key)}">
-            <span><strong>${esc(p.nome)}</strong>${p.provider ? `<small>${esc(p.provider)}</small>` : ''}</span>
-            <span class="check">${ocultas.has(p.key) ? '✓' : ''}</span>
-          </button>`).join('')}
-      </div>` : '<div class="card ttp-compact-empty">Nenhuma conta disponível para ocultar ainda.</div>'}
-    <div class="form-error" id="ttp-ocultar-err"></div>
-    <button class="btn btn-primary" id="ttp-save-ocultar">Salvar</button>
-    <button class="btn btn-secondary" id="ttp-cancel-ocultar">Cancelar</button>
+    <div class="sheet-scroll">
+      <div class="field-hint ttp-sheet-hint">Marque as contas que <b>não</b> devem aparecer no ranking de seguidores. Elas continuam salvas e podem ser reexibidas aqui a qualquer momento.</div>
+      ${perfis.length ? `
+        <div class="opts ttp-falhas-lista">
+          ${perfis.map(p => `
+            <button type="button" class="opt ttp-ocultar-opt ${ocultas.has(p.key) ? 'marcada' : ''}" data-key="${esc(p.key)}">
+              <span><strong>${esc(p.nome)}</strong>${p.provider ? `<small>${esc(p.provider)}</small>` : ''}</span>
+              <span class="check">${ocultas.has(p.key) ? '✓' : ''}</span>
+            </button>`).join('')}
+        </div>` : '<div class="card ttp-compact-empty">Nenhuma conta disponível para ocultar ainda.</div>'}
+      <div class="form-error" id="ttp-ocultar-err"></div>
+      <button class="btn btn-primary" id="ttp-save-ocultar">Salvar</button>
+      <button class="btn btn-secondary" id="ttp-cancel-ocultar">Cancelar</button>
+    </div>
   `, sheet => {
     sheet.querySelectorAll('.ttp-ocultar-opt').forEach(btn => {
       btn.addEventListener('click', () => {
