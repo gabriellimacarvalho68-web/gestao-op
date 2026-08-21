@@ -694,6 +694,17 @@ button.stat-clicavel .sub { color: var(--primary); font-weight: 600; }
    ============================================================ */
 .ttp-head-row { flex-wrap: nowrap; }
 .ttp-head-actions { display: flex; align-items: center; gap: 7px; flex: none; }
+/* Ações do cabeçalho do ranking (ocultar contas + expandir/recolher) */
+.ttp-rank-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.ttp-rank-hide-btn {
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 600; color: var(--primary); padding: 4px 2px;
+}
+.ttp-rank-hide-btn:active { opacity: 0.6; }
+/* Reaproveita o visual da lista de falhas para as contas ocultas */
+.ttp-ocultar-opt.marcada { background: var(--danger-bg, rgba(255,59,48,.10)); }
+.ttp-ocultar-opt.marcada .check { color: var(--danger); }
+.ttp-ocultar-opt small { display: block; color: var(--ink-3); font-size: 12px; }
 .ttp-status {
   display: flex; align-items: center; gap: 10px;
   background: #EAF3FF; color: #0060C9;

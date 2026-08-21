@@ -1352,10 +1352,12 @@ function idMetaTtpost(conta) {
 async function verificarMetasTtpost(ranking) {
   const meta = DB.getMetaSeguidoresTtpost();
   if (!meta || !Array.isArray(ranking) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return 0;
+  const ocultos = new Set(DB.getRankingOcultosTtpost());
   const atingidas = ranking.filter(c =>
     c.active !== false
     && Number(c.followers || 0) >= meta
     && idMetaTtpost(c)
+    && !ocultos.has(idMetaTtpost(c))
     && !DB.metaTtpostJaNotificada(idMetaTtpost(c))
   );
   if (!atingidas.length) return 0;
@@ -1460,12 +1462,57 @@ function ttpostFalhasSheet(ranking) {
   });
 }
 
+// Escolha de quais perfis ficam de fora do ranking de seguidores. A marcação é
+// permanente (fica salva até o usuário reexibir a conta).
+function ttpostOcultarSheet(rankingCompleto) {
+  const perfis = (Array.isArray(rankingCompleto) ? rankingCompleto : []).map(c => ({
+    key: idMetaTtpost(c),
+    nome: c.nome_perfil || c.farm?.username || 'Perfil',
+    provider: TTPOST_SCOPE_LABEL[c.provider] || c.provider || '',
+  })).filter(p => p.key);
+  const ocultas = new Set(DB.getRankingOcultosTtpost());
+
+  openSheet(`
+    <h3>Ocultar contas do ranking</h3>
+    <div class="field-hint ttp-sheet-hint">Marque as contas que <b>não</b> devem aparecer no ranking de seguidores. Elas continuam salvas e podem ser reexibidas aqui a qualquer momento.</div>
+    ${perfis.length ? `
+      <div class="opts ttp-falhas-lista">
+        ${perfis.map(p => `
+          <button type="button" class="opt ttp-ocultar-opt ${ocultas.has(p.key) ? 'marcada' : ''}" data-key="${esc(p.key)}">
+            <span><strong>${esc(p.nome)}</strong>${p.provider ? `<small>${esc(p.provider)}</small>` : ''}</span>
+            <span class="check">${ocultas.has(p.key) ? '✓' : ''}</span>
+          </button>`).join('')}
+      </div>` : '<div class="card ttp-compact-empty">Nenhuma conta disponível para ocultar ainda.</div>'}
+    <div class="form-error" id="ttp-ocultar-err"></div>
+    <button class="btn btn-primary" id="ttp-save-ocultar">Salvar</button>
+    <button class="btn btn-secondary" id="ttp-cancel-ocultar">Cancelar</button>
+  `, sheet => {
+    sheet.querySelectorAll('.ttp-ocultar-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const on = btn.classList.toggle('marcada');
+        btn.querySelector('.check').textContent = on ? '✓' : '';
+      });
+    });
+    sheet.querySelector('#ttp-save-ocultar').addEventListener('click', () => {
+      const keys = [...sheet.querySelectorAll('.ttp-ocultar-opt.marcada')].map(b => b.dataset.key);
+      DB.definirRankingOcultosTtpost(keys);
+      closeSheet();
+      toast(keys.length ? `${keys.length} conta(s) oculta(s) ✓` : 'Ranking sem contas ocultas ✓');
+      renderTtpost(true);
+    });
+    sheet.querySelector('#ttp-cancel-ocultar').addEventListener('click', closeSheet);
+  });
+}
+
 function renderTtpost(skipRemoteRefresh = false) {
   const resumoLocal = DB.resumoTtpost();
   const bridge = TTPOST_BRIDGE.state();
   const snapshot = bridge.snapshot;
   const summary = snapshot?.summary || null;
-  const ranking = ttpostRankingRemoto(snapshot);
+  const rankingCompleto = ttpostRankingRemoto(snapshot);
+  const ocultosSet = new Set(DB.getRankingOcultosTtpost());
+  const ranking = rankingCompleto.filter(c => !ocultosSet.has(idMetaTtpost(c)));
+  const qtdOcultas = rankingCompleto.length - ranking.length;
   const falhasMarcadas = DB.getFalhasPostagemHoje();
   const metaSeguidores = DB.getMetaSeguidoresTtpost();
   const rankingExpandido = APP_PREFS.get().ranking_expandido;
@@ -1520,7 +1567,7 @@ function renderTtpost(skipRemoteRefresh = false) {
       <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${snapshot ? 'nas pastas dos Presets' : `${resumo.estoquesBaixos} estoque(s) baixo(s)`}</div></div>
     </div>
 
-    <div class="section-row"><h2>Ranking de seguidores</h2>${ranking.length > 3 ? `<button class="collapse-toggle section-toggle ${rankingExpandido ? 'open' : ''}" id="ttp-toggle-ranking" type="button" aria-label="${rankingExpandido ? 'Mostrar somente as três maiores contas' : 'Mostrar todas as contas'}" aria-expanded="${rankingExpandido}">⌄</button>` : ''}</div>
+    <div class="section-row"><h2>Ranking de seguidores</h2><div class="ttp-rank-actions">${rankingCompleto.length ? `<button class="ttp-rank-hide-btn" id="ttp-toggle-ocultas" type="button">${qtdOcultas ? `${qtdOcultas} oculta(s)` : 'Ocultar'}</button>` : ''}${ranking.length > 3 ? `<button class="collapse-toggle section-toggle ${rankingExpandido ? 'open' : ''}" id="ttp-toggle-ranking" type="button" aria-label="${rankingExpandido ? 'Mostrar somente as três maiores contas' : 'Mostrar todas as contas'}" aria-expanded="${rankingExpandido}">⌄</button>` : ''}</div></div>
     <div class="ttp-ranking-head"><span>User</span><span>Qtd. seg.</span><span>Média seg./d</span></div>
     <div class="ttp-ranking">
       ${ranking.length ? rankingVisivel.map((c, i) => {
@@ -1536,7 +1583,7 @@ function renderTtpost(skipRemoteRefresh = false) {
           <span class="ttp-average ${c.media_dia > 0 ? 'pos' : c.media_dia < 0 ? 'neg' : ''}">${media}</span>
           ${meta > 0 ? `<span class="ttp-goal"><span style="--pct:${pct}%"></span><small>Meta ${_numero.format(meta)} · ${pct.toFixed(0)}%</small></span>` : '<span class="ttp-goal empty-goal"><small>Sem meta</small></span>'}
         </${tag}>`;
-      }).join('') : `<div class="card empty ttp-empty"><p>${bridge.configured ? 'O TTpost ainda não enviou seguidores.' : 'Conecte a ponte para receber o ranking automaticamente.'}</p></div>`}
+      }).join('') : `<div class="card empty ttp-empty"><p>${qtdOcultas ? 'Todas as contas estão ocultas. Toque em “' + qtdOcultas + ' oculta(s)” para reexibir.' : (bridge.configured ? 'O TTpost ainda não enviou seguidores.' : 'Conecte a ponte para receber o ranking automaticamente.')}</p></div>`}
     </div>
 
     <div class="section-row"><h2>Estoque de vídeos</h2></div>
@@ -1570,6 +1617,8 @@ function renderTtpost(skipRemoteRefresh = false) {
     APP_PREFS.set({ ranking_expandido: !APP_PREFS.get().ranking_expandido });
     renderTtpost(true);
   });
+  const ocultasToggle = document.getElementById('ttp-toggle-ocultas');
+  if (ocultasToggle) ocultasToggle.addEventListener('click', () => ttpostOcultarSheet(rankingCompleto));
   document.querySelectorAll('[data-ttp-account]').forEach(btn => btn.addEventListener('click', () => {
     ttpostContaSheet(DB.listarContasTtpost().find(c => c.id === btn.dataset.ttpAccount));
   }));

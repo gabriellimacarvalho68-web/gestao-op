@@ -46,6 +46,7 @@ const DB = (() => {
       eventos: [],
       meta_seguidores: 0,
       meta_notificadas: {},
+      ranking_ocultos: [],
       atualizado_em: null,
     };
   }
@@ -64,6 +65,9 @@ const DB = (() => {
     t.falhas_postagem = t.falhas_postagem && typeof t.falhas_postagem === 'object'
       ? t.falhas_postagem : { data: null, perfis: [] };
     if (!Array.isArray(t.falhas_postagem.perfis)) t.falhas_postagem.perfis = [];
+    // Perfis que o usuário escolheu ocultar do ranking de seguidores.
+    t.ranking_ocultos = Array.isArray(t.ranking_ocultos)
+      ? [...new Set(t.ranking_ocultos.map(String))] : [];
     t.atualizado_em = t.atualizado_em || null;
     t.custos.forEach(c => {
       if (!TTPOST_CUSTO_BASES.includes(c.base)) c.base = 'mensal_por_conta';
@@ -653,6 +657,21 @@ const DB = (() => {
     };
     persist();
     return data.ttpost.falhas_postagem.perfis.slice();
+  }
+
+  // Perfis que o usuário optou por ocultar do ranking de seguidores.
+  // A marcação é permanente (diferente das falhas, que zeram no dia seguinte).
+  function getRankingOcultosTtpost() {
+    return Array.isArray(data.ttpost.ranking_ocultos)
+      ? data.ttpost.ranking_ocultos.slice() : [];
+  }
+
+  function definirRankingOcultosTtpost(perfis) {
+    data.ttpost.ranking_ocultos = Array.isArray(perfis)
+      ? [...new Set(perfis.map(String).filter(Boolean))] : [];
+    data.ttpost.atualizado_em = now();
+    persist();
+    return data.ttpost.ranking_ocultos.slice();
   }
 
   function listarEstoquesTtpost() {
@@ -1877,6 +1896,7 @@ const DB = (() => {
     getMetaSeguidoresTtpost, setMetaSeguidoresTtpost,
     metaTtpostJaNotificada, marcarMetaTtpostNotificada,
     getFalhasPostagemHoje, definirFalhasPostagemHoje,
+    getRankingOcultosTtpost, definirRankingOcultosTtpost,
     listarEstoquesTtpost, salvarEstoqueTtpost, excluirEstoqueTtpost,
     resumoTtpost, detalharCustoTtpostFarm, custoOperacionalTtpostFarm,
     exportar, importar, totais,
