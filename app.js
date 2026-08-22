@@ -1421,8 +1421,9 @@ function ttpostMetaSheet(ranking) {
 }
 
 // Marcação manual de quais perfis falharam a postagem de hoje. Vale só para o
-// dia atual (some sozinho ao virar o dia).
-function ttpostFalhasSheet(ranking) {
+// dia atual (some sozinho ao virar o dia). É um complemento quando o TTpost
+// não tiver o detalhe do erro registrado.
+function ttpostFalhasManualSheet(ranking) {
   const perfis = (Array.isArray(ranking) ? ranking : []).map(c => ({
     key: idMetaTtpost(c),
     nome: c.nome_perfil || c.farm?.username || 'Perfil',
@@ -1461,6 +1462,46 @@ function ttpostFalhasSheet(ranking) {
       renderTtpost(true);
     });
     sheet.querySelector('#ttp-cancel-falhas').addEventListener('click', closeSheet);
+  });
+}
+
+function ttpostErrosSheet(snapshot, ranking) {
+  const logs = (Array.isArray(snapshot?.errors_today) ? snapshot.errors_today : [])
+    .filter(log => log && typeof log === 'object' && log.message)
+    .slice(0, 30);
+  const totalFalhas = Number(snapshot?.summary?.failures_today || 0);
+  const atualizado = snapshot?.generated_at
+    ? `Atualizado ${fmtDataHora(snapshot.generated_at)}`
+    : 'Dados locais';
+  const resumo = logs.length
+    ? `${logs.length} erro(s) recebido(s) hoje`
+    : (totalFalhas
+      ? `${totalFalhas} falha(s) contabilizada(s), sem detalhe enviado pelo TTpost.`
+      : 'Nenhum erro de postagem registrado hoje.');
+
+  openSheet(`
+    <h3>Erros de postagem</h3>
+    <div class="sheet-scroll">
+      <div class="ttp-errors-summary">
+        <strong>${esc(resumo)}</strong>
+        <small>${esc(atualizado)}</small>
+      </div>
+      ${logs.length ? `<div class="ttp-errors-list">
+        ${logs.map(log => `
+          <article class="ttp-error-item">
+            <div><span>Erro</span><time>${esc(fmtDataHora(log.created_at))}</time></div>
+            <p>${esc(log.message)}</p>
+          </article>`).join('')}
+      </div>` : '<div class="ttp-errors-empty">Quando uma postagem falhar, o motivo aparecerá aqui automaticamente.</div>'}
+      <button class="btn btn-secondary" id="ttp-open-manual-falhas">Marcar falha manualmente</button>
+      <button class="btn btn-primary" id="ttp-close-erros">Fechar</button>
+    </div>
+  `, sheet => {
+    sheet.querySelector('#ttp-open-manual-falhas').addEventListener('click', () => {
+      closeSheet();
+      ttpostFalhasManualSheet(ranking);
+    });
+    sheet.querySelector('#ttp-close-erros').addEventListener('click', closeSheet);
   });
 }
 
@@ -1566,7 +1607,7 @@ function renderTtpost(skipRemoteRefresh = false) {
 
     <div class="stats-grid ttp-stats">
       <div class="stat"><div class="label">Contas ativas</div><div class="value">${resumo.ativas}</div><div class="sub">${snapshot ? 'nos Presets do PC' : `de ${resumo.contas} vinculadas`}</div></div>
-      <button type="button" class="stat stat-clicavel" id="ttp-posts-stat"><div class="label">Posts hoje</div><div class="value">${resumo.postsHoje}</div><div class="sub">${falhasMarcadas.length} falha(s) marcada(s) ›</div></button>
+      <button type="button" class="stat stat-clicavel" id="ttp-posts-stat"><div class="label">Posts hoje</div><div class="value">${resumo.postsHoje}</div><div class="sub">${resumo.falhasHoje || falhasMarcadas.length} falha(s) · ver detalhes ›</div></button>
       <div class="stat"><div class="label">${snapshot ? 'Aquecendo agora' : 'Aquecimentos hoje'}</div><div class="value">${resumo.aquecimentosHoje}</div></div>
       <div class="stat"><div class="label">Vídeos disponíveis</div><div class="value ${resumo.estoquesBaixos ? 'neg' : ''}">${resumo.videos}</div><div class="sub">${snapshot ? 'nas pastas dos Presets' : `${resumo.estoquesBaixos} estoque(s) baixo(s)`}</div></div>
     </div>
@@ -1615,7 +1656,7 @@ function renderTtpost(skipRemoteRefresh = false) {
   document.getElementById('ttp-config-bridge').addEventListener('click', ttpostBridgeSheet);
   document.getElementById('ttp-open-bridge').addEventListener('click', ttpostBridgeSheet);
   document.getElementById('ttp-meta').addEventListener('click', () => ttpostMetaSheet(ranking));
-  document.getElementById('ttp-posts-stat').addEventListener('click', () => ttpostFalhasSheet(ranking));
+  document.getElementById('ttp-posts-stat').addEventListener('click', () => ttpostErrosSheet(snapshot, ranking));
   const rankingToggle = document.getElementById('ttp-toggle-ranking');
   if (rankingToggle) rankingToggle.addEventListener('click', () => {
     APP_PREFS.set({ ranking_expandido: !APP_PREFS.get().ranking_expandido });
