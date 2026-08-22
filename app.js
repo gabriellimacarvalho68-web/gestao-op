@@ -1489,7 +1489,7 @@ function ttpostErrosSheet(snapshot, ranking) {
       ${logs.length ? `<div class="ttp-errors-list">
         ${logs.map(log => `
           <article class="ttp-error-item">
-            <div><span>Erro</span><time>${esc(fmtDataHora(log.created_at))}</time></div>
+            <div><span>Conta · ${esc(log.profile_name || log.profile_id || 'Não identificada')}</span><time>${esc(fmtDataHora(log.created_at))}</time></div>
             <p>${esc(log.message)}</p>
           </article>`).join('')}
       </div>` : '<div class="ttp-errors-empty">Quando uma postagem falhar, o motivo aparecerá aqui automaticamente.</div>'}
