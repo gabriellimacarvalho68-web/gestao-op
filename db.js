@@ -161,6 +161,11 @@ const DB = (() => {
 
   function persist() {
     localStorage.setItem(KEY, JSON.stringify(data));
+    // A interface continua local-first, mas avisa a camada opcional de
+    // sincronização quando algum dado de negócio foi alterado.
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('gestao-op-dados-alterados'));
+    }
   }
 
   function now() {

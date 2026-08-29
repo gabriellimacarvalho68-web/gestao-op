@@ -1,6 +1,17 @@
 # Gestão Operações
 
-App (PWA) para gestão de compra e venda de contas do TikTok — estoque, vendas, lucro e histórico. Os dados de negócio continuam salvos localmente no dispositivo. A aba TTpost usa uma ponte Supabase opcional para receber seguidores, postagens e estoque de vídeos do computador.
+App (PWA) para gestão de compra e venda de contas do TikTok — estoque, vendas, lucro e histórico. Os dados de negócio continuam disponíveis localmente/offline. Em **Configurações → Sincronização entre celular e PC**, ative a sincronização e use o código gerado no outro aparelho; assim os lançamentos passam a aparecer nos dois lados. A aba TTpost usa uma ponte Supabase opcional para receber seguidores, postagens e estoque de vídeos do computador.
+
+## Instalar no Windows
+
+Execute `Gestao-OP-Setup-2.1.0.exe` gerado na pasta `dist/`. Ele instala o Gestão OP como um aplicativo normal do Windows, com atalho no Menu Iniciar e na Área de Trabalho. Na primeira abertura, vá em **Configurações** e cole o código de pareamento criado no celular — os dados do celular substituirão os dados locais do PC.
+
+Para gerar o instalador novamente:
+
+```
+npm install
+npm run dist:win
+```
 
 ## Como testar no computador
 
@@ -30,7 +41,8 @@ No iPhone:
 
 ## Importante sobre os dados
 
-- Os dados ficam salvos **apenas no dispositivo** (localStorage do navegador/app).
+- Sem sincronização, os dados ficam salvos **apenas no dispositivo** (localStorage do navegador/app).
+- A sincronização usa um código privado de pareamento. Guarde-o como uma senha: quem tiver o código poderá ler e alterar os dados do espaço pareado.
 - Não limpe os dados do Safari nas configurações do iPhone, ou os registros serão apagados.
 - **Backup**: toque no ícone de nuvem no Dashboard → **Exportar backup** para salvar um arquivo com tudo (em Arquivos/iCloud, WhatsApp, email). Para recuperar, use **Importar backup** na mesma tela.
 - As senhas das contas são armazenadas **sem criptografia** no dispositivo — o app é de uso pessoal; não compartilhe o aparelho desbloqueado.

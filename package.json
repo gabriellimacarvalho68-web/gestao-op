@@ -1,0 +1,36 @@
+{
+  "name": "gestao-op",
+  "version": "2.1.0",
+  "description": "Centro de operações sincronizado entre PC e celular",
+  "main": "electron-main.js",
+  "author": "Gestão OP",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.gestaoop.desktop",
+    "productName": "Gestão OP",
+    "asar": true,
+    "directories": { "output": "dist" },
+    "files": ["index.html", "app.js", "db.js", "sync.js", "styles.css", "manifest.webmanifest", "electron-main.js", "icons/**/*"],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "Gestao-OP-Setup-${version}.${ext}",
+      "icon": "icons/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Gestão OP"
+    }
+  }
+}

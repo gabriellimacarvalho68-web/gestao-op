@@ -1,0 +1,4 @@
+node_modules/
+dist/
+builder.log
+supabase/.temp/

@@ -1694,6 +1694,7 @@ function renderTtpost(skipRemoteRefresh = false) {
    ============================================================ */
 function renderConfiguracoes() {
   const formato = APP_PREFS.get().roi_formato;
+  const sync = GESTAO_OP_SYNC.state();
   const opcoes = [
     ['percentual', 'Percentual', 'Exibe 100,0% ou 200,0%'],
     ['multiplicador', 'Multiplicador', 'Exibe 2,0x ou 3,0x'],
@@ -1724,6 +1725,26 @@ function renderConfiguracoes() {
       </div>
     </div>
 
+    <div class="card settings-card sync-card">
+      <div class="setting-title">Sincronização entre celular e PC</div>
+      ${sync.configured ? `
+        <p class="sync-copy">${sync.error ? esc(sync.error) : 'Seus lançamentos são atualizados automaticamente nos aparelhos pareados.'}</p>
+        <div class="detail-row"><span class="k">Status</span><span class="v ${sync.error ? 'neg' : 'pos'}">${sync.error ? 'Aguardando conexão' : 'Ativa'}</span></div>
+        <div class="detail-row"><span class="k">Última atualização</span><span class="v">${sync.syncedAt ? fmtDataHora(sync.syncedAt) : 'Enviando…'}</span></div>
+        <div class="sync-actions">
+          <button class="btn btn-secondary" id="btn-sync-now">Sincronizar agora</button>
+          <button class="btn btn-secondary" id="btn-sync-code">Mostrar código para outro aparelho</button>
+          <button class="btn btn-danger-ghost" id="btn-sync-disconnect">Desconectar este aparelho</button>
+        </div>
+      ` : `
+        <p class="sync-copy">Crie um espaço privado neste aparelho e use o código no celular ou no PC. Ao conectar um segundo aparelho, os dados daqui substituem os dados locais dele.</p>
+        <div class="sync-actions">
+          <button class="btn btn-primary" id="btn-sync-create">Ativar sincronização</button>
+          <button class="btn btn-secondary" id="btn-sync-connect">Tenho um código de outro aparelho</button>
+        </div>
+      `}
+    </div>
+
     <div class="card settings-card">
       <div class="setting-title">Zerar custos das contas em Crescendo</div>
       <p style="font-size:13px;color:var(--ink-2);margin:8px 0 12px;">
@@ -1743,6 +1764,59 @@ function renderConfiguracoes() {
       toast('Formato do ROI atualizado ✓');
       renderConfiguracoes();
     });
+  });
+
+  const mostrarCodigo = async code => {
+    try { await copiarTexto(code); } catch (_err) { /* o código permanece visível abaixo */ }
+    alert(`Código de pareamento:\n\n${code}\n\nCole este código em Configurações → “Tenho um código de outro aparelho”.`);
+  };
+  const criarSync = document.getElementById('btn-sync-create');
+  if (criarSync) criarSync.addEventListener('click', async () => {
+    criarSync.disabled = true;
+    criarSync.textContent = 'Ativando…';
+    try {
+      const estado = await GESTAO_OP_SYNC.create();
+      toast('Sincronização ativada ✓');
+      await mostrarCodigo(estado.pairingCode);
+      renderConfiguracoes();
+    } catch (err) {
+      toast(err.message || 'Não foi possível ativar a sincronização.');
+      renderConfiguracoes();
+    }
+  });
+  const conectarSync = document.getElementById('btn-sync-connect');
+  if (conectarSync) conectarSync.addEventListener('click', async () => {
+    const codigo = prompt('Cole o código de pareamento criado no outro aparelho:');
+    if (!codigo) return;
+    conectarSync.disabled = true;
+    try {
+      await GESTAO_OP_SYNC.connect(codigo);
+      toast('Aparelho conectado e dados atualizados ✓');
+      renderConfiguracoes();
+    } catch (err) {
+      toast(err.message || 'Não foi possível conectar o aparelho.');
+      renderConfiguracoes();
+    }
+  });
+  const sincronizarAgora = document.getElementById('btn-sync-now');
+  if (sincronizarAgora) sincronizarAgora.addEventListener('click', async () => {
+    sincronizarAgora.disabled = true;
+    sincronizarAgora.textContent = 'Sincronizando…';
+    try {
+      await GESTAO_OP_SYNC.push();
+      await GESTAO_OP_SYNC.pull();
+      toast('Dados sincronizados ✓');
+    } catch (err) { toast(err.message || 'Não foi possível sincronizar.'); }
+    renderConfiguracoes();
+  });
+  const codigoSync = document.getElementById('btn-sync-code');
+  if (codigoSync) codigoSync.addEventListener('click', () => mostrarCodigo(GESTAO_OP_SYNC.state().pairingCode));
+  const desconectarSync = document.getElementById('btn-sync-disconnect');
+  if (desconectarSync) desconectarSync.addEventListener('click', () => {
+    if (!confirm('Desconectar somente este aparelho? Os dados locais serão mantidos.')) return;
+    GESTAO_OP_SYNC.disconnect();
+    toast('Este aparelho foi desconectado.');
+    renderConfiguracoes();
   });
 
   document.getElementById('btn-zerar-custos').addEventListener('click', () => {
