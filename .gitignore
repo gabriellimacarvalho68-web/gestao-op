@@ -1,4 +1,4 @@
 node_modules/
 dist/
-builder.log
+builder*.log
 supabase/.temp/

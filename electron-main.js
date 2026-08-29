@@ -17,6 +17,10 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // Em monitores Windows com escala de 125%/150%, a PWA ficava grande demais
+  // dentro da janela desktop. Mantém uma proporção confortável sem alterar a
+  // versão instalada no celular.
+  window.webContents.setZoomFactor(0.9);
   window.loadFile(path.join(__dirname, 'index.html'));
   window.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
