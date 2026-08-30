@@ -268,13 +268,119 @@ const FARM_ONEDRIVE = (() => {
     }
   }
 
-  window.addEventListener('load', () => atualizar().catch(() => {}));
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) atualizar().catch(() => {});
-  });
-  setInterval(() => { if (!document.hidden) atualizar().catch(() => {}); }, 60000);
-
   return { estado, configurar, atualizar };
+})();
+
+// O OneDrive pessoal bloqueia downloads automatizados da nuvem. Para manter
+// Excel → celular sem depender do app Windows, esta macro envia as linhas
+// diretamente ao mesmo espaço privado da sincronização.
+const FARM_EXCEL_VBA = (() => {
+  const ENDPOINT = 'https://oakylrntjdqnrybxbpvo.supabase.co/functions/v1/gestao-op-sync';
+
+  function codigo() {
+    const pareamento = GESTAO_OP_SYNC.state().pairingCode;
+    const partes = pareamento.split('.');
+    if (partes.length !== 2) throw new Error('Ative a sincronização antes de gerar a macro do Excel.');
+    const [syncId, accessKey] = partes;
+    return `' Gestão OP — importar contas FARM do Excel para o celular
+' Salve esta planilha como .xlsm e habilite as macros ao abri-la.
+Option Explicit
+
+Private Const ENDPOINT As String = "${ENDPOINT}"
+Private Const SYNC_ID As String = "${syncId}"
+Private Const ACCESS_KEY As String = "${accessKey}"
+Private ProximaExecucao As Date
+
+Public Sub Auto_Open()
+    EnviarFarmAoCelular
+End Sub
+
+Public Sub EnviarFarmAoCelular()
+    On Error GoTo Finalizar
+    Dim ws As Worksheet, linhaCabecalho As Long, ultimaLinha As Long, ultimaColuna As Long
+    Dim cabecalhos As Object, linha As Long, coluna As Long, json As String, primeira As Boolean
+    Set ws = ThisWorkbook.Worksheets(1)
+    linhaCabecalho = EncontrarCabecalho(ws)
+    If linhaCabecalho = 0 Then Err.Raise vbObjectError + 100, , "Não encontrei a coluna usuario na planilha."
+    ultimaLinha = ws.Cells.Find("*", SearchOrder:=xlByRows, SearchDirection:=xlPrevious).Row
+    ultimaColuna = ws.Cells(linhaCabecalho, ws.Columns.Count).End(xlToLeft).Column
+    Set cabecalhos = CreateObject("Scripting.Dictionary")
+    For coluna = 1 To ultimaColuna
+        If Len(Normalizar(ws.Cells(linhaCabecalho, coluna).Value)) > 0 Then cabecalhos(Normalizar(ws.Cells(linhaCabecalho, coluna).Value)) = coluna
+    Next coluna
+
+    json = "{\"action\":\"import_excel_rows\",\"sync_id\":\"" & SYNC_ID & "\",\"access_key\":\"" & ACCESS_KEY & "\",\"rows\":["
+    primeira = True
+    For linha = linhaCabecalho + 1 To ultimaLinha
+        If Len(Valor(ws, linha, cabecalhos, "usuario")) > 0 Or Len(Valor(ws, linha, cabecalhos, "username")) > 0 Then
+            If Not primeira Then json = json & ","
+            json = json & "{\"usuario\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "usuario", "username")) & "\",\"email\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "email")) & "\",\"senha\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "senha")) & "\",\"observacoes\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "observacoes", "observacao", "obs")) & "\",\"estagio\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "estagio", "status")) & "\",\"lote\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "lote")) & "\"}"
+            primeira = False
+        End If
+    Next linha
+    json = json & "]}"
+
+    Dim requisicao As Object
+    Set requisicao = CreateObject("WinHttp.WinHttpRequest.5.1")
+    requisicao.Open "POST", ENDPOINT, False
+    requisicao.SetRequestHeader "Content-Type", "application/json"
+    requisicao.Send json
+    If requisicao.Status < 200 Or requisicao.Status >= 300 Then Err.Raise vbObjectError + 101, , "Gestão OP respondeu HTTP " & requisicao.Status
+    Application.StatusBar = "Gestão OP: contas FARM sincronizadas com o celular."
+
+Finalizar:
+    AgendarProximoEnvio
+End Sub
+
+Private Sub AgendarProximoEnvio()
+    On Error Resume Next
+    ProximaExecucao = Now + TimeSerial(0, 1, 0)
+    Application.OnTime ProximaExecucao, "EnviarFarmAoCelular"
+End Sub
+
+Private Function EncontrarCabecalho(ws As Worksheet) As Long
+    Dim linha As Long, coluna As Long, ultimaColuna As Long
+    ultimaColuna = ws.Cells.Find("*", SearchOrder:=xlByColumns, SearchDirection:=xlPrevious).Column
+    For linha = 1 To Application.Min(50, ws.UsedRange.Rows.Count + ws.UsedRange.Row - 1)
+        For coluna = 1 To ultimaColuna
+            If Normalizar(ws.Cells(linha, coluna).Value) = "usuario" Or Normalizar(ws.Cells(linha, coluna).Value) = "username" Then EncontrarCabecalho = linha: Exit Function
+        Next coluna
+    Next linha
+End Function
+
+Private Function Valor(ws As Worksheet, linha As Long, cabecalhos As Object, ParamArray nomes()) As String
+    Dim nome As Variant
+    For Each nome In nomes
+        If cabecalhos.Exists(CStr(nome)) Then Valor = Trim(CStr(ws.Cells(linha, cabecalhos(CStr(nome))).Value)): Exit Function
+    Next nome
+End Function
+
+Private Function Normalizar(valor As Variant) As String
+    Dim texto As String
+    texto = LCase(Trim(CStr(valor)))
+    texto = Replace(texto, "á", "a"): texto = Replace(texto, "à", "a"): texto = Replace(texto, "ã", "a"): texto = Replace(texto, "â", "a")
+    texto = Replace(texto, "é", "e"): texto = Replace(texto, "ê", "e"): texto = Replace(texto, "í", "i"): texto = Replace(texto, "ó", "o"): texto = Replace(texto, "ô", "o"): texto = Replace(texto, "õ", "o"): texto = Replace(texto, "ú", "u"): texto = Replace(texto, "ç", "c")
+    Normalizar = texto
+End Function
+
+Private Function EscaparJson(valor As String) As String
+    EscaparJson = Replace(valor, "\\", "\\\\")
+    EscaparJson = Replace(EscaparJson, Chr$(34), "\\" & Chr$(34))
+    EscaparJson = Replace(EscaparJson, vbCrLf, "\\n")
+End Function
+`;
+  }
+
+  function baixar() {
+    const arquivo = new Blob([codigo()], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(arquivo);
+    link.download = 'GestaoOP-Farm.bas';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
+
+  return { codigo, baixar };
 })();
 
 // Preferências exclusivamente visuais deste aparelho.
@@ -1882,7 +1988,6 @@ function renderConfiguracoes() {
   const formato = APP_PREFS.get().roi_formato;
   const sync = GESTAO_OP_SYNC.state();
   const excel = FARM_EXCEL.estado();
-  const onedrive = FARM_ONEDRIVE.estado();
   const opcoes = [
     ['percentual', 'Percentual', 'Exibe 100,0% ou 200,0%'],
     ['multiplicador', 'Multiplicador', 'Exibe 2,0x ou 3,0x'],
@@ -1934,18 +2039,14 @@ function renderConfiguracoes() {
     </div>
 
     <div class="card settings-card sync-card">
-      <div class="setting-title">Planilha OneDrive do FARM</div>
+      <div class="setting-title">Excel automático do FARM</div>
       ${sync.configured ? `
-        <p class="sync-copy">O app consulta a planilha de exibição do OneDrive quando está aberto. As linhas novas entram no FARM; data e IP são ignorados.</p>
-        <div class="form-group" style="margin:10px 0 0;">
-          <label>Link de exibição da planilha</label>
-          <input id="onedrive-farm-url" type="url" inputmode="url" autocapitalize="none" autocomplete="off" placeholder="https://1drv.ms/..." value="${esc(onedrive.url)}">
-        </div>
-        ${onedrive.erro ? `<p class="form-error show">${esc(onedrive.erro)}</p>` : ''}
-        ${onedrive.sincronizadoEm ? `<div class="detail-row"><span class="k">Última leitura</span><span class="v">${fmtDataHora(onedrive.sincronizadoEm)}</span></div>` : ''}
+        <p class="sync-copy">O OneDrive pessoal bloqueia a leitura pelo servidor. Esta macro, instalada uma vez na sua planilha, envia as contas novas diretamente ao celular a cada minuto enquanto o Excel estiver aberto.</p>
         <div class="sync-actions">
-          <button class="btn btn-primary" id="btn-onedrive-farm">${onedrive.sincronizando ? 'Atualizando…' : 'Salvar e atualizar'}</button>
+          <button class="btn btn-primary" id="btn-excel-vba-copy">Copiar macro do Excel</button>
+          <button class="btn btn-secondary" id="btn-excel-vba-download">Baixar arquivo da macro</button>
         </div>
+        <p class="sync-copy" style="margin-top:10px">Depois, salve a planilha como <strong>.xlsm</strong> e habilite as macros ao abri-la. Data e IP são ignorados; a senha do TikTok fica igual à senha do email.</p>
       ` : `
         <p class="sync-copy">Ative primeiro a sincronização acima. Ela cria o espaço privado que recebe as contas da planilha no seu celular.</p>
       `}
@@ -2044,20 +2145,19 @@ function renderConfiguracoes() {
     renderConfiguracoes();
   });
 
-  const atualizarOneDrive = document.getElementById('btn-onedrive-farm');
-  if (atualizarOneDrive) atualizarOneDrive.addEventListener('click', async () => {
-    const campo = document.getElementById('onedrive-farm-url');
-    atualizarOneDrive.disabled = true;
-    atualizarOneDrive.textContent = 'Atualizando…';
+  const copiarMacroExcel = document.getElementById('btn-excel-vba-copy');
+  if (copiarMacroExcel) copiarMacroExcel.addEventListener('click', async () => {
     try {
-      FARM_ONEDRIVE.configurar(campo.value);
-      const resultado = await FARM_ONEDRIVE.atualizar();
-      const erros = resultado.erros?.length ? ` ${resultado.erros.slice(0, 2).join(' ')}` : '';
-      toast(`${resultado.adicionadas || 0} conta(s) nova(s); ${resultado.ignoradas || 0} já existiam.${erros}`);
-    } catch (erro) {
-      toast(erro.message || 'Não foi possível atualizar pela planilha.');
-    }
-    renderConfiguracoes();
+      await copiarTexto(FARM_EXCEL_VBA.codigo());
+      toast('Macro copiada. No PC, abra o Excel e pressione Alt + F11 para colar.');
+    } catch (erro) { toast(erro.message || 'Não foi possível gerar a macro.'); }
+  });
+  const baixarMacroExcel = document.getElementById('btn-excel-vba-download');
+  if (baixarMacroExcel) baixarMacroExcel.addEventListener('click', () => {
+    try {
+      FARM_EXCEL_VBA.baixar();
+      toast('Arquivo da macro baixado. Envie-o para o PC e importe no Excel.');
+    } catch (erro) { toast(erro.message || 'Não foi possível gerar a macro.'); }
   });
 
   const escolherExcel = document.getElementById('btn-excel-escolher');

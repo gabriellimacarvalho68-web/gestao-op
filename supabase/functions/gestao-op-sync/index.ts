@@ -84,34 +84,7 @@ function chaveUsername(valor: unknown) {
   return String(valor || "").trim().replace(/^@/, "").toLowerCase();
 }
 
-async function importarPlanilhaPublica(link: string, snapshot: Record<string, unknown>) {
-  // download=1 evita a página de prévia do Excel. A URL de origem continua
-  // restrita ao OneDrive; não aceitamos URLs arbitrárias nesta função privada.
-  const urlDownload = link + (link.includes("?") ? "&" : "?") + "download=1";
-  const resposta = await fetch(urlDownload, { redirect: "follow" });
-  if (!resposta.ok) throw new Error("O OneDrive não permitiu baixar a planilha de exibição.");
-  const bytes = new Uint8Array(await resposta.arrayBuffer());
-  if (!bytes.length || bytes.length > 10_000_000) throw new Error("A planilha está vazia ou excede o limite de 10 MB.");
-
-  const XLSX = await import("npm:xlsx@0.18.5");
-  const livro = XLSX.read(bytes, { type: "array", cellDates: false });
-  let registros: Array<{ linha: number; valores: Record<string, string> }> = [];
-  for (const nomeAba of livro.SheetNames) {
-    const linhas = XLSX.utils.sheet_to_json(livro.Sheets[nomeAba], { header: 1, defval: "", raw: false }) as unknown[][];
-    const indiceCabecalho = linhas.findIndex(linha => (linha as unknown[]).map(normalizar).includes("usuario") || (linha as unknown[]).map(normalizar).includes("username"));
-    if (indiceCabecalho < 0) continue;
-    const cabecalhos = (linhas[indiceCabecalho] as unknown[]).map(normalizar);
-    registros = linhas.slice(indiceCabecalho + 1).map((celulas, indice) => {
-      const valores: Record<string, string> = {};
-      cabecalhos.forEach((cabecalho, coluna) => {
-        if (cabecalho) valores[cabecalho] = String((celulas as unknown[])[coluna] ?? "").trim();
-      });
-      return { linha: indiceCabecalho + indice + 2, valores };
-    }).filter(registro => Object.values(registro.valores).some(Boolean));
-    break;
-  }
-  if (!registros.length) throw new Error("Não encontrei contas com a coluna usuario na planilha.");
-
+function importarRegistrosFarm(registros: Array<{ linha: number; valores: Record<string, string> }>, snapshot: Record<string, unknown>) {
   const dados = snapshot as Record<string, any>;
   dados.farm = Array.isArray(dados.farm) ? dados.farm : [];
   dados.farm_historico = Array.isArray(dados.farm_historico) ? dados.farm_historico : [];
@@ -143,11 +116,56 @@ async function importarPlanilhaPublica(link: string, snapshot: Record<string, un
       preco_venda: null, lucro: 0, status, observacoes: valorDaLinha(registro.valores, ["observacoes", "observacao", "obs"]),
       data_inicio: agora, data_venda: null, criado_em: agora, atualizado_em: agora,
     });
-    dados.farm_historico.push({ id: crypto.randomUUID(), farm_id: id, evento: "Conta criada", descricao: `Conta @${username} importada da planilha OneDrive.`, criado_em: agora });
+    dados.farm_historico.push({ id: crypto.randomUUID(), farm_id: id, evento: "Conta criada", descricao: `Conta @${username} importada do Excel.`, criado_em: agora });
     existentes.add(chave);
     adicionadas += 1;
   });
   return { snapshot: dados, adicionadas, ignoradas, erros: erros.slice(0, 5) };
+}
+
+function registrosRecebidosDoExcel(valor: unknown) {
+  if (!Array.isArray(valor) || !valor.length) throw new Error("O Excel não enviou linhas para importar.");
+  if (valor.length > 1_000) throw new Error("O Excel pode enviar no máximo 1.000 linhas por vez.");
+  return valor.map((linha, indice) => {
+    if (!linha || typeof linha !== "object" || Array.isArray(linha)) throw new Error(`Linha ${indice + 1}: formato inválido.`);
+    const valores: Record<string, string> = {};
+    Object.entries(linha as Record<string, unknown>).forEach(([cabecalho, celula]) => {
+      const nome = normalizar(cabecalho);
+      if (nome) valores[nome] = String(celula ?? "").trim();
+    });
+    return { linha: indice + 1, valores };
+  }).filter(registro => Object.values(registro.valores).some(Boolean));
+}
+
+async function importarPlanilhaPublica(link: string, snapshot: Record<string, unknown>) {
+  // download=1 evita a página de prévia do Excel. A URL de origem continua
+  // restrita ao OneDrive; não aceitamos URLs arbitrárias nesta função privada.
+  const urlDownload = link + (link.includes("?") ? "&" : "?") + "download=1";
+  const resposta = await fetch(urlDownload, { redirect: "follow" });
+  if (!resposta.ok) throw new Error("O OneDrive não permitiu baixar a planilha de exibição.");
+  const bytes = new Uint8Array(await resposta.arrayBuffer());
+  if (!bytes.length || bytes.length > 10_000_000) throw new Error("A planilha está vazia ou excede o limite de 10 MB.");
+
+  const XLSX = await import("npm:xlsx@0.18.5");
+  const livro = XLSX.read(bytes, { type: "array", cellDates: false });
+  let registros: Array<{ linha: number; valores: Record<string, string> }> = [];
+  for (const nomeAba of livro.SheetNames) {
+    const linhas = XLSX.utils.sheet_to_json(livro.Sheets[nomeAba], { header: 1, defval: "", raw: false }) as unknown[][];
+    const indiceCabecalho = linhas.findIndex(linha => (linha as unknown[]).map(normalizar).includes("usuario") || (linha as unknown[]).map(normalizar).includes("username"));
+    if (indiceCabecalho < 0) continue;
+    const cabecalhos = (linhas[indiceCabecalho] as unknown[]).map(normalizar);
+    registros = linhas.slice(indiceCabecalho + 1).map((celulas, indice) => {
+      const valores: Record<string, string> = {};
+      cabecalhos.forEach((cabecalho, coluna) => {
+        if (cabecalho) valores[cabecalho] = String((celulas as unknown[])[coluna] ?? "").trim();
+      });
+      return { linha: indiceCabecalho + indice + 2, valores };
+    }).filter(registro => Object.values(registro.valores).some(Boolean));
+    break;
+  }
+  if (!registros.length) throw new Error("Não encontrei contas com a coluna usuario na planilha.");
+
+  return importarRegistrosFarm(registros, snapshot);
 }
 
 Deno.serve(async request => {
@@ -203,6 +221,19 @@ Deno.serve(async request => {
       const modifiedAt = new Date().toISOString();
       const { error } = await supabase.from("gestao_op_sync_spaces").update({
         snapshot: importacao.snapshot, modified_at: modifiedAt, updated_at: modifiedAt, last_source_id: "onedrive-public-excel",
+      }).eq("id", space.id);
+      if (error) return json({ error: "Não foi possível salvar as contas importadas." }, 500);
+      return json({ ok: true, ...importacao, modified_at: modifiedAt, updated_at: modifiedAt });
+    }
+    if (action === "import_excel_rows") {
+      if (!space.snapshot || typeof space.snapshot !== "object") {
+        return json({ error: "Ative a sincronização primeiro para criar os dados do app na nuvem." }, 400);
+      }
+      const registros = registrosRecebidosDoExcel(body.rows);
+      const importacao = importarRegistrosFarm(registros, structuredClone(space.snapshot) as Record<string, unknown>);
+      const modifiedAt = new Date().toISOString();
+      const { error } = await supabase.from("gestao_op_sync_spaces").update({
+        snapshot: importacao.snapshot, modified_at: modifiedAt, updated_at: modifiedAt, last_source_id: "excel-vba",
       }).eq("id", space.id);
       if (error) return json({ error: "Não foi possível salvar as contas importadas." }, 500);
       return json({ ok: true, ...importacao, modified_at: modifiedAt, updated_at: modifiedAt });
