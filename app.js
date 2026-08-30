@@ -289,6 +289,7 @@ Option Explicit
 Private Const ENDPOINT As String = "${ENDPOINT}"
 Private Const SYNC_ID As String = "${syncId}"
 Private Const ACCESS_KEY As String = "${accessKey}"
+Private Const Q As String = """"
 Private ProximaExecucao As Date
 
 Public Sub Auto_Open()
@@ -309,12 +310,12 @@ Public Sub EnviarFarmAoCelular()
         If Len(Normalizar(ws.Cells(linhaCabecalho, coluna).Value)) > 0 Then cabecalhos(Normalizar(ws.Cells(linhaCabecalho, coluna).Value)) = coluna
     Next coluna
 
-    json = "{\"action\":\"import_excel_rows\",\"sync_id\":\"" & SYNC_ID & "\",\"access_key\":\"" & ACCESS_KEY & "\",\"rows\":["
+    json = "{" & Q & "action" & Q & ":" & Q & "import_excel_rows" & Q & "," & Q & "sync_id" & Q & ":" & Q & SYNC_ID & Q & "," & Q & "access_key" & Q & ":" & Q & ACCESS_KEY & Q & "," & Q & "rows" & Q & ":["
     primeira = True
     For linha = linhaCabecalho + 1 To ultimaLinha
         If Len(Valor(ws, linha, cabecalhos, "usuario")) > 0 Or Len(Valor(ws, linha, cabecalhos, "username")) > 0 Then
             If Not primeira Then json = json & ","
-            json = json & "{\"usuario\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "usuario", "username")) & "\",\"email\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "email")) & "\",\"senha\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "senha")) & "\",\"observacoes\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "observacoes", "observacao", "obs")) & "\",\"estagio\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "estagio", "status")) & "\",\"lote\":\"" & EscaparJson(Valor(ws, linha, cabecalhos, "lote")) & "\"}"
+            json = json & "{" & CampoJson("usuario", Valor(ws, linha, cabecalhos, "usuario", "username")) & "," & CampoJson("email", Valor(ws, linha, cabecalhos, "email")) & "," & CampoJson("senha", Valor(ws, linha, cabecalhos, "senha")) & "," & CampoJson("observacoes", Valor(ws, linha, cabecalhos, "observacoes", "observacao", "obs")) & "," & CampoJson("estagio", Valor(ws, linha, cabecalhos, "estagio", "status")) & "," & CampoJson("lote", Valor(ws, linha, cabecalhos, "lote")) & "}"
             primeira = False
         End If
     Next linha
@@ -361,6 +362,10 @@ Private Function Normalizar(valor As Variant) As String
     texto = Replace(texto, "á", "a"): texto = Replace(texto, "à", "a"): texto = Replace(texto, "ã", "a"): texto = Replace(texto, "â", "a")
     texto = Replace(texto, "é", "e"): texto = Replace(texto, "ê", "e"): texto = Replace(texto, "í", "i"): texto = Replace(texto, "ó", "o"): texto = Replace(texto, "ô", "o"): texto = Replace(texto, "õ", "o"): texto = Replace(texto, "ú", "u"): texto = Replace(texto, "ç", "c")
     Normalizar = texto
+End Function
+
+Private Function CampoJson(nome As String, valor As String) As String
+    CampoJson = Q & nome & Q & ":" & Q & EscaparJson(valor) & Q
 End Function
 
 Private Function EscaparJson(valor As String) As String
