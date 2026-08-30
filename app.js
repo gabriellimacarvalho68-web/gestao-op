@@ -91,6 +91,192 @@ const TTPOST_BRIDGE = (() => {
   return { state, setToken, disconnect, refresh };
 })();
 
+// Ponte exclusiva do app Windows: o arquivo Excel continua no PC e só as
+// contas novas entram no banco local. A sincronização existente envia o
+// resultado para o celular, sem expor a planilha na internet.
+const FARM_EXCEL = (() => {
+  const api = window.gestaoOpExcel || null;
+  let estado = { disponivel: Boolean(api), carregado: !api, configurada: false };
+  let importando = false;
+
+  function normalizar(valor) {
+    return String(valor || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  function valor(registro, nomes) {
+    for (const nome of nomes) {
+      const encontrado = registro.valores[normalizar(nome)];
+      if (encontrado != null && String(encontrado).trim()) return String(encontrado).trim();
+    }
+    return '';
+  }
+
+  function chaveUsername(username) {
+    return String(username || '').trim().replace(/^@/, '').toLowerCase();
+  }
+
+  function encontrarLote(lotePlanilha) {
+    const procurado = normalizar(lotePlanilha);
+    if (!procurado) return null;
+    const opcoes = [procurado];
+    if (/^\d+$/.test(procurado)) opcoes.push(`lote ${procurado}`);
+    return DB.listarFarmLotes().find(lote => opcoes.includes(normalizar(lote.nome))) || null;
+  }
+
+  function importarRegistros(registros) {
+    const existentes = new Set(DB.listarFarm().map(conta => chaveUsername(conta.username)));
+    const resultado = { adicionadas: 0, ignoradas: 0, erros: [] };
+
+    registros.forEach(registro => {
+      const username = valor(registro, ['usuario', 'username']);
+      if (!username) {
+        resultado.ignoradas += 1;
+        return;
+      }
+      const chave = chaveUsername(username);
+      if (existentes.has(chave)) {
+        resultado.ignoradas += 1;
+        return;
+      }
+
+      const textoEstagio = valor(registro, ['estagio', 'status']);
+      const status = textoEstagio
+        ? DB.FARM_STATUS.find(item => normalizar(item) === normalizar(textoEstagio))
+        : 'Crescendo';
+      if (!status) {
+        resultado.erros.push(`Linha ${registro.linha}: estágio “${textoEstagio}” não reconhecido.`);
+        return;
+      }
+
+      const textoLote = valor(registro, ['lote']);
+      const lote = encontrarLote(textoLote);
+      if (textoLote && !lote) {
+        resultado.erros.push(`Linha ${registro.linha}: o lote “${textoLote}” não existe no app.`);
+        return;
+      }
+
+      const senha = valor(registro, ['senha', 'senha do email']);
+      try {
+        DB.criarFarm({
+          username,
+          email: valor(registro, ['email', 'e mail']),
+          senha,
+          // A planilha atual usa a mesma senha para email e TikTok. Caso uma
+          // coluna própria seja adicionada no futuro, ela terá prioridade.
+          senha_tiktok: valor(registro, ['senha tiktok', 'senha do tiktok']) || senha,
+          lote_id: lote ? lote.id : null,
+          status,
+          observacoes: valor(registro, ['observacoes', 'observacao', 'obs']),
+        });
+        existentes.add(chave);
+        resultado.adicionadas += 1;
+      } catch (erro) {
+        resultado.erros.push(`Linha ${registro.linha}: ${erro.message}`);
+      }
+    });
+    return resultado;
+  }
+
+  async function atualizarEstado() {
+    if (!api) return estado;
+    const remoto = await api.estado();
+    estado = { ...remoto, carregado: true };
+    return estado;
+  }
+
+  async function escolherArquivo() {
+    if (!api) return estado;
+    const remoto = await api.escolherArquivo();
+    estado = { ...remoto, carregado: true };
+    return estado;
+  }
+
+  async function importarAgora() {
+    if (!api) throw new Error('A importação automática está disponível apenas no app Windows.');
+    if (importando) return null;
+    importando = true;
+    try {
+      const planilha = await api.ler();
+      const resultado = importarRegistros(planilha.registros || []);
+      await atualizarEstado();
+      return { ...resultado, aba: planilha.aba };
+    } finally {
+      importando = false;
+    }
+  }
+
+  if (api) {
+    atualizarEstado().catch(() => {});
+    api.aoAlterar(() => {
+      importarAgora().then(resultado => {
+        if (!resultado) return;
+        if (resultado.adicionadas) toast(`${resultado.adicionadas} conta(s) nova(s) importada(s) do Excel ✓`);
+        if (location.hash === '#/configuracoes') renderConfiguracoes();
+      }).catch(() => {});
+    });
+  }
+
+  return { estado: () => estado, atualizarEstado, escolherArquivo, importarAgora };
+})();
+
+// Importa diretamente no celular a planilha pública do OneDrive. O arquivo
+// nunca é salvo no app: a função privada de sincronização lê, valida e aplica
+// somente contas FARM inéditas ao espaço já pareado.
+const FARM_ONEDRIVE = (() => {
+  const KEY = 'gestao-op-farm-onedrive-v1';
+  let sincronizando = false;
+
+  function ler() {
+    try {
+      const valor = JSON.parse(localStorage.getItem(KEY) || '{}');
+      return valor && typeof valor === 'object' ? valor : {};
+    } catch (_erro) { return {}; }
+  }
+
+  function estado() {
+    const atual = ler();
+    return { url: atual.url || '', sincronizadoEm: atual.sincronizado_em || null, erro: atual.erro || null, sincronizando };
+  }
+
+  function configurar(url) {
+    const link = String(url || '').trim();
+    if (!/^https:\/\/1drv\.ms\//i.test(link)) throw new Error('Cole o link de exibição do OneDrive.');
+    localStorage.setItem(KEY, JSON.stringify({ url: link, sincronizado_em: null, erro: null }));
+  }
+
+  async function atualizar() {
+    const atual = ler();
+    if (!atual.url || sincronizando) return null;
+    sincronizando = true;
+    try {
+      const resultado = await GESTAO_OP_SYNC.importarExcelPublico(atual.url);
+      localStorage.setItem(KEY, JSON.stringify({
+        ...atual, sincronizado_em: new Date().toISOString(), erro: null,
+      }));
+      return resultado;
+    } catch (erro) {
+      localStorage.setItem(KEY, JSON.stringify({ ...atual, erro: erro.message || 'Não foi possível ler a planilha.' }));
+      throw erro;
+    } finally {
+      sincronizando = false;
+    }
+  }
+
+  window.addEventListener('load', () => atualizar().catch(() => {}));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) atualizar().catch(() => {});
+  });
+  setInterval(() => { if (!document.hidden) atualizar().catch(() => {}); }, 60000);
+
+  return { estado, configurar, atualizar };
+})();
+
 // Preferências exclusivamente visuais deste aparelho.
 const APP_PREFS = (() => {
   const KEY = 'gestao-op-ui-preferences-v1';
@@ -1695,6 +1881,8 @@ function renderTtpost(skipRemoteRefresh = false) {
 function renderConfiguracoes() {
   const formato = APP_PREFS.get().roi_formato;
   const sync = GESTAO_OP_SYNC.state();
+  const excel = FARM_EXCEL.estado();
+  const onedrive = FARM_ONEDRIVE.estado();
   const opcoes = [
     ['percentual', 'Percentual', 'Exibe 100,0% ou 200,0%'],
     ['multiplicador', 'Multiplicador', 'Exibe 2,0x ou 3,0x'],
@@ -1744,6 +1932,43 @@ function renderConfiguracoes() {
         </div>
       `}
     </div>
+
+    <div class="card settings-card sync-card">
+      <div class="setting-title">Planilha OneDrive do FARM</div>
+      ${sync.configured ? `
+        <p class="sync-copy">O app consulta a planilha de exibição do OneDrive quando está aberto. As linhas novas entram no FARM; data e IP são ignorados.</p>
+        <div class="form-group" style="margin:10px 0 0;">
+          <label>Link de exibição da planilha</label>
+          <input id="onedrive-farm-url" type="url" inputmode="url" autocapitalize="none" autocomplete="off" placeholder="https://1drv.ms/..." value="${esc(onedrive.url)}">
+        </div>
+        ${onedrive.erro ? `<p class="form-error show">${esc(onedrive.erro)}</p>` : ''}
+        ${onedrive.sincronizadoEm ? `<div class="detail-row"><span class="k">Última leitura</span><span class="v">${fmtDataHora(onedrive.sincronizadoEm)}</span></div>` : ''}
+        <div class="sync-actions">
+          <button class="btn btn-primary" id="btn-onedrive-farm">${onedrive.sincronizando ? 'Atualizando…' : 'Salvar e atualizar'}</button>
+        </div>
+      ` : `
+        <p class="sync-copy">Ative primeiro a sincronização acima. Ela cria o espaço privado que recebe as contas da planilha no seu celular.</p>
+      `}
+    </div>
+
+    ${excel.disponivel ? `
+      <div class="card settings-card sync-card">
+        <div class="setting-title">Planilha Excel do FARM</div>
+        ${excel.carregado ? (excel.configurada ? `
+          <p class="sync-copy">Arquivo conectado: <strong>${esc(excel.arquivo)}</strong>. Ao salvar uma nova linha no Excel, ela será adicionada ao FARM e enviada ao celular pela sincronização.</p>
+          <div class="detail-row"><span class="k">Fonte</span><span class="v pos">Conectada</span></div>
+          <div class="detail-row"><span class="k">Última leitura</span><span class="v">${excel.atualizadoEm ? fmtDataHora(excel.atualizadoEm) : 'Ainda não importada'}</span></div>
+          <div class="sync-actions">
+            <button class="btn btn-primary" id="btn-excel-importar">Importar agora</button>
+            <button class="btn btn-secondary" id="btn-excel-escolher">Trocar planilha</button>
+          </div>
+        ` : `
+          <p class="sync-copy">Escolha a cópia do Excel que fica sincronizada no seu computador. Data e IP são ignorados; o lote <strong>5</strong> é vinculado ao <strong>Lote 5</strong> do app.</p>
+          ${excel.erro ? `<p class="form-error show">${esc(excel.erro)}</p>` : ''}
+          <div class="sync-actions"><button class="btn btn-primary" id="btn-excel-escolher">Conectar planilha Excel</button></div>
+        `) : '<p class="sync-copy">Verificando a conexão com o Excel…</p>'}
+      </div>
+    ` : ''}
 
     <div class="card settings-card">
       <div class="setting-title">Zerar custos das contas em Crescendo</div>
@@ -1818,6 +2043,60 @@ function renderConfiguracoes() {
     toast('Este aparelho foi desconectado.');
     renderConfiguracoes();
   });
+
+  const atualizarOneDrive = document.getElementById('btn-onedrive-farm');
+  if (atualizarOneDrive) atualizarOneDrive.addEventListener('click', async () => {
+    const campo = document.getElementById('onedrive-farm-url');
+    atualizarOneDrive.disabled = true;
+    atualizarOneDrive.textContent = 'Atualizando…';
+    try {
+      FARM_ONEDRIVE.configurar(campo.value);
+      const resultado = await FARM_ONEDRIVE.atualizar();
+      const erros = resultado.erros?.length ? ` ${resultado.erros.slice(0, 2).join(' ')}` : '';
+      toast(`${resultado.adicionadas || 0} conta(s) nova(s); ${resultado.ignoradas || 0} já existiam.${erros}`);
+    } catch (erro) {
+      toast(erro.message || 'Não foi possível atualizar pela planilha.');
+    }
+    renderConfiguracoes();
+  });
+
+  const escolherExcel = document.getElementById('btn-excel-escolher');
+  if (escolherExcel) escolherExcel.addEventListener('click', async () => {
+    escolherExcel.disabled = true;
+    try {
+      const estado = await FARM_EXCEL.escolherArquivo();
+      if (!estado.configurada) {
+        renderConfiguracoes();
+        return;
+      }
+      const resultado = await FARM_EXCEL.importarAgora();
+      const detalhes = resultado.erros.length ? ` ${resultado.erros.slice(0, 2).join(' ')}` : '';
+      toast(`${resultado.adicionadas} conta(s) importada(s); ${resultado.ignoradas} já existiam.${detalhes}`);
+    } catch (erro) {
+      toast(erro.message || 'Não foi possível conectar a planilha.');
+    }
+    renderConfiguracoes();
+  });
+
+  const importarExcel = document.getElementById('btn-excel-importar');
+  if (importarExcel) importarExcel.addEventListener('click', async () => {
+    importarExcel.disabled = true;
+    importarExcel.textContent = 'Importando…';
+    try {
+      const resultado = await FARM_EXCEL.importarAgora();
+      const detalhes = resultado.erros.length ? ` ${resultado.erros.slice(0, 2).join(' ')}` : '';
+      toast(`${resultado.adicionadas} conta(s) nova(s); ${resultado.ignoradas} já existiam.${detalhes}`);
+    } catch (erro) {
+      toast(erro.message || 'Não foi possível importar a planilha.');
+    }
+    renderConfiguracoes();
+  });
+
+  if (excel.disponivel && !excel.carregado) {
+    FARM_EXCEL.atualizarEstado().then(() => {
+      if (location.hash === '#/configuracoes') renderConfiguracoes();
+    }).catch(() => {});
+  }
 
   document.getElementById('btn-zerar-custos').addEventListener('click', () => {
     if (!confirm(`Zerar ${fmtBRL(totalAZerar)} de custo em ${crescendoComCusto.length} conta(s) em Crescendo? Faça um backup antes — isso não tem como desfazer.`)) return;

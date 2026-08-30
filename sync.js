@@ -123,6 +123,31 @@ const GESTAO_OP_SYNC = (() => {
     }
   }
 
+  async function importarExcelPublico(url) {
+    const config = read();
+    if (!config.sync_id || !config.access_key) {
+      throw new Error('Ative primeiro a sincronização entre celular e PC para criar seu espaço privado.');
+    }
+    const link = String(url || '').trim();
+    if (!/^https:\/\/(?:1drv\.ms|(?:[a-z0-9-]+\.)*(?:sharepoint\.com|onedrive\.live\.com))\//i.test(link)) {
+      throw new Error('Cole um link público válido do OneDrive.');
+    }
+    const result = await request({
+      action: 'import_public_excel', sync_id: config.sync_id, access_key: config.access_key,
+      public_url: link,
+    });
+    if (!result.snapshot) throw new Error('A planilha não devolveu dados para importar.');
+    applyingRemote = true;
+    try {
+      DB.importar(JSON.stringify(result.snapshot));
+      write({ remote_updated_at: result.updated_at, local_updated_at: result.modified_at, error: null });
+    } finally {
+      applyingRemote = false;
+    }
+    window.dispatchEvent(new CustomEvent('gestao-op-sync-status'));
+    return result;
+  }
+
   function markChanged() {
     if (applyingRemote || !state().configured) return;
     write({ local_updated_at: new Date().toISOString(), error: null });
@@ -163,5 +188,5 @@ const GESTAO_OP_SYNC = (() => {
   });
   setInterval(() => { if (!document.hidden) pull().catch(() => {}); }, 30000);
 
-  return { state, create, connect, push, pull, disconnect };
+  return { state, create, connect, push, pull, importarExcelPublico, disconnect };
 })();
