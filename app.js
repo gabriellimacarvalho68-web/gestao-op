@@ -600,6 +600,7 @@ document.addEventListener('visibilitychange', () => {
 function contaItemHTML(c) {
   const inicial = c.username.replace(/^@/, '').charAt(0) || '?';
   const lucroTxt = c.preco_venda == null ? 'Em estoque' : fmtBRL(c.lucro);
+  const anuncio = c.anunciada === true;
   return `
     <a class="conta-item" href="#/conta/${c.id}">
       <div class="avatar">${esc(inicial)}</div>
@@ -607,6 +608,7 @@ function contaItemHTML(c) {
         <div class="username">@${esc(c.username.replace(/^@/, ''))}</div>
         <div class="meta">${esc(c.fornecedor || 'Sem fornecedor')}</div>
         <span class="badge ${esc(c.status)}">${esc(c.status)}</span>
+        <span class="anuncio-status ${anuncio ? 'anunciada' : 'pendente'}"><span class="anuncio-dot"></span>${anuncio ? 'Anunciada' : 'Não anunciada'}</span>
       </div>
       <div class="fin">
         <div class="lucro ${lucroClass(c)}">${lucroTxt}</div>
@@ -1116,6 +1118,16 @@ function renderCadastro() {
         </div>
       </div>
       <div class="form-group">
+        <label>Status do anúncio</label>
+        <label class="anuncio-control">
+          <input name="anunciada" type="checkbox">
+          <span>
+            <strong>Conta anunciada</strong>
+            <small>Marque quando a conta já estiver com anúncio ativo.</small>
+          </span>
+        </label>
+      </div>
+      <div class="form-group">
         <label>Observações</label>
         <textarea name="observacoes" placeholder="Anotações sobre a conta"></textarea>
       </div>
@@ -1135,6 +1147,7 @@ function renderCadastro() {
         fornecedor: f.get('fornecedor'),
         preco_compra: f.get('preco_compra'),
         status: f.get('status'),
+        anunciada: f.get('anunciada') === 'on',
         observacoes: f.get('observacoes'),
       });
       toast('Conta cadastrada ✓');
@@ -1158,6 +1171,7 @@ function renderDetalhes(id) {
   }
   const hist = DB.historicoDaConta(id);
   const vendida = c.preco_venda != null;
+  const anuncio = c.anunciada === true;
 
   $view.innerHTML = `
     <a class="back-link" href="#/contas">
@@ -1186,6 +1200,7 @@ function renderDetalhes(id) {
           ${c.senha ? copyBtnHTML('senha') : ''}
         </span>
       </div>
+      <div class="detail-row"><span class="k">Anúncio</span><button type="button" class="anuncio-status anuncio-action ${anuncio ? 'anunciada' : 'pendente'}" id="btn-anuncio" aria-label="${anuncio ? 'Marcar como não anunciada' : 'Marcar como anunciada'}"><span class="anuncio-dot"></span>${anuncio ? 'Anunciada' : 'Não anunciada'}</button></div>
     </div>
 
     <h2>Financeiro</h2>
@@ -1288,6 +1303,14 @@ function renderDetalhes(id) {
       });
       sheet.querySelector('#sheet-cancel').addEventListener('click', closeSheet);
     });
+  });
+
+  document.getElementById('btn-anuncio').addEventListener('click', () => {
+    try {
+      DB.atualizarConta(id, { anunciada: !anuncio });
+      toast(anuncio ? 'Conta marcada como não anunciada' : 'Conta marcada como anunciada ✓');
+      renderDetalhes(id);
+    } catch (err) { toast(err.message); }
   });
 
   // Excluir
@@ -2911,6 +2934,16 @@ function renderEditarConta(id) {
         <input name="preco_venda" type="number" inputmode="decimal" step="0.01" min="0" value="${c.preco_venda}">
       </div>` : ''}
       <div class="form-group">
+        <label>Status do anúncio</label>
+        <label class="anuncio-control">
+          <input name="anunciada" type="checkbox" ${c.anunciada === true ? 'checked' : ''}>
+          <span>
+            <strong>Conta anunciada</strong>
+            <small>Marque quando a conta já estiver com anúncio ativo.</small>
+          </span>
+        </label>
+      </div>
+      <div class="form-group">
         <label>Observações</label>
         <textarea name="observacoes">${esc(c.observacoes)}</textarea>
       </div>
@@ -2930,6 +2963,7 @@ function renderEditarConta(id) {
         fornecedor: f.get('fornecedor'),
         preco_compra: f.get('preco_compra'),
         preco_venda: f.get('preco_venda'),
+        anunciada: f.get('anunciada') === 'on',
         observacoes: f.get('observacoes'),
       });
       toast('Alterações salvas ✓');

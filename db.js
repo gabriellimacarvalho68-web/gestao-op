@@ -138,6 +138,9 @@ const DB = (() => {
         obj.emails = obj.emails || [];
         obj.ttpost = normalizarTtpost(obj.ttpost);
         obj.meta_anual = obj.meta_anual != null ? obj.meta_anual : 10000;
+        obj.contas.forEach(c => {
+          c.anunciada = c.anunciada === true || c.anunciada === 1 || c.anunciada === 'true';
+        });
         // Migração: custo passa a ser custo_proprio + fatias de recursos
         obj.farm.forEach(f => {
           if (f.custo_proprio == null) f.custo_proprio = Number(f.custo || 0);
@@ -752,7 +755,7 @@ const DB = (() => {
     return data.contas.find(c => c.id === id) || null;
   }
 
-  function criarConta({ username, email, senha, fornecedor, preco_compra, status, observacoes, data_compra }) {
+  function criarConta({ username, email, senha, fornecedor, preco_compra, status, observacoes, data_compra, anunciada }) {
     username = String(username || '').trim();
     fornecedor = String(fornecedor || '').trim();
     if (!username) throw new Error('Username é obrigatório.');
@@ -771,6 +774,7 @@ const DB = (() => {
       preco_venda: null,
       lucro: 0,
       status: STATUS.includes(status) ? status : 'Comprada',
+      anunciada: anunciada === true || anunciada === 1 || anunciada === 'true',
       observacoes: String(observacoes || '').trim(),
       data_compra: data_compra || now(),
       data_venda: null,
@@ -800,6 +804,14 @@ const DB = (() => {
         if (v !== conta[k]) { conta[k] = v; mudou = true; }
       }
     });
+    if (campos.anunciada !== undefined) {
+      const anunciada = campos.anunciada === true || campos.anunciada === 1 || campos.anunciada === 'true';
+      if (anunciada !== (conta.anunciada === true)) {
+        conta.anunciada = anunciada;
+        mudou = true;
+        addHistorico(id, 'Anúncio atualizado', anunciada ? 'Conta marcada como anunciada.' : 'Conta marcada como não anunciada.');
+      }
+    }
     if (campos.preco_compra != null && campos.preco_compra !== '' &&
         !isNaN(Number(campos.preco_compra)) && Number(campos.preco_compra) >= 0) {
       const anterior = conta.preco_compra;
@@ -1826,6 +1838,9 @@ const DB = (() => {
       throw new Error('Arquivo inválido: não é um backup do Gestão Op.');
     if (obj.contas.some(c => !c.id || !c.username))
       throw new Error('Backup corrompido: contas sem id/username.');
+    obj.contas.forEach(c => {
+      c.anunciada = c.anunciada === true || c.anunciada === 1 || c.anunciada === 'true';
+    });
     // Farm e Ofertas: opcionais (retrocompatível com backups das versões 1 e 2)
     const farm = Array.isArray(obj.farm) ? obj.farm : [];
     const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
