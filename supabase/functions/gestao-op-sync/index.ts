@@ -59,6 +59,27 @@ async function loadSpace(body: Record<string, unknown>) {
   return { space: data };
 }
 
+async function salvarSeAtual(space: { id: string; modified_at: string | null }, alteracoes: Record<string, unknown>) {
+  let consulta = supabase.from("gestao_op_sync_spaces")
+    .update(alteracoes).eq("id", space.id);
+  consulta = space.modified_at
+    ? consulta.eq("modified_at", space.modified_at)
+    : consulta.is("modified_at", null);
+  const { data, error } = await consulta.select("id").maybeSingle();
+  return { salvo: Boolean(data), erro: Boolean(error) };
+}
+
+async function conflitoAtual(id: string) {
+  const { data } = await supabase.from("gestao_op_sync_spaces")
+    .select("snapshot,modified_at,updated_at").eq("id", id).maybeSingle();
+  return json({
+    error: "Há uma versão mais nova em outro aparelho.",
+    snapshot: data?.snapshot || null,
+    modified_at: data?.modified_at || null,
+    updated_at: data?.updated_at || null,
+  }, 409);
+}
+
 function normalizar(valor: unknown) {
   return String(valor || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -205,10 +226,11 @@ Deno.serve(async request => {
         return json({ error: "Há uma versão mais nova em outro aparelho.", snapshot: space.snapshot, modified_at: space.modified_at, updated_at: space.updated_at }, 409);
       }
       const updatedAt = new Date().toISOString();
-      const { error } = await supabase.from("gestao_op_sync_spaces").update({
+      const gravacao = await salvarSeAtual(space, {
         snapshot, modified_at: modifiedAt, updated_at: updatedAt, last_source_id: sourceId,
-      }).eq("id", space.id);
-      if (error) return json({ error: "Não foi possível salvar a sincronização." }, 500);
+      });
+      if (gravacao.erro) return json({ error: "Não foi possível salvar a sincronização." }, 500);
+      if (!gravacao.salvo) return await conflitoAtual(space.id);
       return json({ ok: true, modified_at: modifiedAt, updated_at: updatedAt });
     }
     if (action === "import_public_excel") {
@@ -218,11 +240,15 @@ Deno.serve(async request => {
         return json({ error: "Ative a sincronização primeiro para criar os dados do app na nuvem." }, 400);
       }
       const importacao = await importarPlanilhaPublica(link, structuredClone(space.snapshot) as Record<string, unknown>);
+      if (importacao.adicionadas === 0) {
+        return json({ ok: true, ...importacao, modified_at: space.modified_at, updated_at: space.updated_at });
+      }
       const modifiedAt = new Date().toISOString();
-      const { error } = await supabase.from("gestao_op_sync_spaces").update({
+      const gravacao = await salvarSeAtual(space, {
         snapshot: importacao.snapshot, modified_at: modifiedAt, updated_at: modifiedAt, last_source_id: "onedrive-public-excel",
-      }).eq("id", space.id);
-      if (error) return json({ error: "Não foi possível salvar as contas importadas." }, 500);
+      });
+      if (gravacao.erro) return json({ error: "Não foi possível salvar as contas importadas." }, 500);
+      if (!gravacao.salvo) return await conflitoAtual(space.id);
       return json({ ok: true, ...importacao, modified_at: modifiedAt, updated_at: modifiedAt });
     }
     if (action === "import_excel_rows") {
@@ -231,11 +257,15 @@ Deno.serve(async request => {
       }
       const registros = registrosRecebidosDoExcel(body.rows);
       const importacao = importarRegistrosFarm(registros, structuredClone(space.snapshot) as Record<string, unknown>);
+      if (importacao.adicionadas === 0) {
+        return json({ ok: true, ...importacao, modified_at: space.modified_at, updated_at: space.updated_at });
+      }
       const modifiedAt = new Date().toISOString();
-      const { error } = await supabase.from("gestao_op_sync_spaces").update({
+      const gravacao = await salvarSeAtual(space, {
         snapshot: importacao.snapshot, modified_at: modifiedAt, updated_at: modifiedAt, last_source_id: "excel-vba",
-      }).eq("id", space.id);
-      if (error) return json({ error: "Não foi possível salvar as contas importadas." }, 500);
+      });
+      if (gravacao.erro) return json({ error: "Não foi possível salvar as contas importadas." }, 500);
+      if (!gravacao.salvo) return await conflitoAtual(space.id);
       return json({ ok: true, ...importacao, modified_at: modifiedAt, updated_at: modifiedAt });
     }
     return json({ error: "Ação desconhecida." }, 400);

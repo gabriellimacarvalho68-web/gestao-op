@@ -163,12 +163,12 @@ const DB = (() => {
 
   let data = load();
 
-  function persist() {
+  function persist(detalhe = null) {
     localStorage.setItem(KEY, JSON.stringify(data));
     // A interface continua local-first, mas avisa a camada opcional de
     // sincronização quando algum dado de negócio foi alterado.
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(new CustomEvent('gestao-op-dados-alterados'));
+      window.dispatchEvent(new CustomEvent('gestao-op-dados-alterados', { detail: detalhe }));
     }
   }
 
@@ -784,7 +784,7 @@ const DB = (() => {
     data.contas.push(conta);
     addHistorico(conta.id, 'Conta criada', `Conta @${conta.username} cadastrada.`);
     addHistorico(conta.id, 'Compra registrada', `Compra de ${fmtBRL(conta.preco_compra)} — fornecedor ${conta.fornecedor}.`);
-    persist();
+    persist({ tipo: 'nova_conta', colecao: 'contas', id: conta.id });
     return conta;
   }
 
@@ -792,6 +792,9 @@ const DB = (() => {
     const conta = getConta(id);
     if (!conta) throw new Error('Conta não encontrada.');
     let mudou = false;
+    let anuncioAlterado = false;
+    const somenteAnuncio = Object.keys(campos).filter(k => k !== 'anunciada')
+      .every(k => String(campos[k] ?? '') === String(conta[k] ?? ''));
     if (campos.username != null) {
       const u = String(campos.username).trim();
       if (!u) throw new Error('Username é obrigatório.');
@@ -809,6 +812,7 @@ const DB = (() => {
       if (anunciada !== (conta.anunciada === true)) {
         conta.anunciada = anunciada;
         mudou = true;
+        anuncioAlterado = true;
         addHistorico(id, 'Anúncio atualizado', anunciada ? 'Conta marcada como anunciada.' : 'Conta marcada como não anunciada.');
       }
     }
@@ -833,7 +837,9 @@ const DB = (() => {
     }
     if (mudou) addHistorico(id, 'Dados atualizados', 'Informações da conta editadas.');
     conta.atualizado_em = now();
-    persist();
+    persist(anuncioAlterado && somenteAnuncio
+      ? { tipo: 'anuncio', colecao: 'contas', id, anunciada: conta.anunciada }
+      : null);
     return conta;
   }
 
@@ -992,7 +998,7 @@ const DB = (() => {
     if (loteVinculado) {
       addFarmHistorico(f.id, 'Vinculada a lote', `Conta adicionada ao ${loteVinculado.nome}.`);
     }
-    persist();
+    persist({ tipo: 'nova_conta', colecao: 'farm', id: f.id });
     return f;
   }
 
@@ -1000,6 +1006,9 @@ const DB = (() => {
     const f = getFarm(id);
     if (!f) throw new Error('Conta não encontrada.');
     let mudou = false;
+    let anuncioAlterado = false;
+    const somenteAnuncio = Object.keys(campos).filter(k => k !== 'anunciada')
+      .every(k => String(campos[k] ?? '') === String(f[k] ?? ''));
     if (campos.username != null) {
       const u = String(campos.username).trim();
       if (!u) throw new Error('Username é obrigatório.');
@@ -1017,6 +1026,7 @@ const DB = (() => {
       if (anunciada !== (f.anunciada === true)) {
         f.anunciada = anunciada;
         mudou = true;
+        anuncioAlterado = true;
         addFarmHistorico(id, 'Anúncio atualizado', anunciada ? 'Conta marcada como anunciada.' : 'Conta marcada como não anunciada.');
       }
     }
@@ -1057,7 +1067,9 @@ const DB = (() => {
     recalcularCustosFarm(); // recalcula custo/lucro de todas (o split pode ter mudado)
     if (mudou) addFarmHistorico(id, 'Dados atualizados', 'Informações da conta editadas.');
     f.atualizado_em = now();
-    persist();
+    persist(anuncioAlterado && somenteAnuncio
+      ? { tipo: 'anuncio', colecao: 'farm', id, anunciada: f.anunciada }
+      : null);
     return f;
   }
 

@@ -71,24 +71,106 @@ const GESTAO_OP_SYNC = (() => {
 
   function snapshot() { return JSON.parse(DB.exportar()); }
 
+  function temAlteracaoPendente(config = read()) {
+    return config.pending === true || (config.pending == null && Boolean(
+      config.local_updated_at && config.remote_updated_at &&
+      config.local_updated_at > config.remote_updated_at
+    ));
+  }
+
+  function agendarEnvio(atraso = 800) {
+    clearTimeout(timer);
+    timer = setTimeout(() => push().catch(() => {}), atraso);
+  }
+
+  function reaplicarAlteracoes(remoto, local, criacoes, anuncios, data) {
+    const dados = JSON.parse(JSON.stringify(remoto));
+    for (const item of criacoes) {
+      const lista = dados[item.colecao];
+      const localLista = local[item.colecao];
+      const conta = Array.isArray(localLista) ? localLista.find(c => c.id === item.id) : null;
+      if (!Array.isArray(lista) || !conta) return null;
+      if (!lista.some(c => c.id === item.id)) {
+        const nome = String(conta.username || '').replace(/^@/, '').toLowerCase();
+        if (lista.some(c => String(c.username || '').replace(/^@/, '').toLowerCase() === nome)) return null;
+        lista.push(conta);
+      }
+      const chave = item.colecao === 'farm' ? 'farm_id' : 'conta_id';
+      const historico = item.colecao === 'farm' ? dados.farm_historico : dados.historico;
+      const historicoLocal = item.colecao === 'farm' ? local.farm_historico : local.historico;
+      if (!Array.isArray(historico) || !Array.isArray(historicoLocal)) return null;
+      const existentes = new Set(historico.map(h => h.id));
+      historicoLocal.filter(h => h[chave] === item.id && !existentes.has(h.id))
+        .forEach(h => historico.push(h));
+    }
+    for (const item of anuncios) {
+      const lista = dados[item.colecao];
+      const conta = Array.isArray(lista) ? lista.find(c => c.id === item.id) : null;
+      if (!conta) return null;
+      conta.anunciada = item.anunciada;
+      conta.atualizado_em = data;
+      const historico = item.colecao === 'farm' ? dados.farm_historico : dados.historico;
+      if (!Array.isArray(historico)) return null;
+      historico.push({
+        id: crypto.randomUUID(),
+        [item.colecao === 'farm' ? 'farm_id' : 'conta_id']: item.id,
+        evento: 'Anúncio atualizado',
+        descricao: item.anunciada ? 'Conta marcada como anunciada.' : 'Conta marcada como não anunciada.',
+        criado_em: data,
+      });
+    }
+    return dados;
+  }
+
   async function push(force = false) {
     const config = read();
-    if (!config.sync_id || !config.access_key || pushing) return state();
+    if (!config.sync_id || !config.access_key || pushing ||
+        (!force && !temAlteracaoPendente(config) && config.remote_updated_at)) return state();
     pushing = true;
     try {
-      const modifiedAt = config.local_updated_at || new Date().toISOString();
-      const result = await request({
-        action: 'push', sync_id: config.sync_id, access_key: config.access_key,
-        source_id: sourceId(), modified_at: modifiedAt, snapshot: snapshot(), force,
-      });
-      write({ remote_updated_at: result.updated_at, local_updated_at: result.modified_at, error: null });
-      window.dispatchEvent(new CustomEvent('gestao-op-sync-status'));
-      return state();
+      let envio = snapshot();
+      let dataEnvio = config.local_updated_at || new Date().toISOString();
+      const revisao = Number(config.local_revision || 0);
+      let rebase = false;
+      for (let tentativa = 0; tentativa < 3; tentativa++) {
+        try {
+          const result = await request({
+            action: 'push', sync_id: config.sync_id, access_key: config.access_key,
+            source_id: sourceId(), modified_at: dataEnvio, snapshot: envio, force,
+          });
+          const atual = read();
+          if (Number(atual.local_revision || 0) === revisao) {
+            if (rebase) {
+              applyingRemote = true;
+              try { DB.importar(JSON.stringify(envio)); } finally { applyingRemote = false; }
+            }
+            write({
+              remote_updated_at: result.updated_at, local_updated_at: result.modified_at,
+              pending: false, pending_other: false, pending_anuncios: [], pending_criacoes: [], error: null,
+            });
+          } else {
+            write({ remote_updated_at: result.updated_at, error: null });
+            agendarEnvio(0);
+          }
+          window.dispatchEvent(new CustomEvent('gestao-op-sync-status'));
+          return state();
+        } catch (error) {
+          const atual = read();
+          const anuncios = Array.isArray(atual.pending_anuncios) ? atual.pending_anuncios : [];
+          const criacoes = Array.isArray(atual.pending_criacoes) ? atual.pending_criacoes : [];
+          if (error.status !== 409 || !error.body?.snapshot || atual.pending_other ||
+              (!anuncios.length && !criacoes.length) ||
+              Number(atual.local_revision || 0) !== revisao) throw error;
+          const remotoEm = Date.parse(error.body.modified_at || '') || 0;
+          dataEnvio = new Date(Math.max(Date.now(), remotoEm + 1)).toISOString();
+          envio = reaplicarAlteracoes(error.body.snapshot, envio, criacoes, anuncios, dataEnvio);
+          if (!envio) throw error;
+          rebase = true;
+        }
+      }
+      throw new Error('A sincronização está recebendo mudanças simultâneas. Tente novamente em instantes.');
     } catch (error) {
       write({ error: error.message || 'Não foi possível sincronizar.' });
-      // Um aparelho ficou offline e outro foi alterado antes dele voltar.
-      // Preserva a versão mais nova do servidor, sem apagar silenciosamente.
-      if (error.status === 409 && error.body?.snapshot && !force) await applyRemote(error.body);
       window.dispatchEvent(new CustomEvent('gestao-op-sync-status'));
       throw error;
     } finally { pushing = false; }
@@ -98,7 +180,8 @@ const GESTAO_OP_SYNC = (() => {
     const config = read();
     const remoteAt = String(result.modified_at || result.updated_at || '');
     const localAt = String(config.local_updated_at || '');
-    if (!result.snapshot || (localAt && remoteAt && localAt > remoteAt)) return false;
+    if (!result.snapshot || temAlteracaoPendente(config) ||
+        (localAt && remoteAt && localAt > remoteAt)) return false;
     applyingRemote = true;
     try {
       DB.importar(JSON.stringify(result.snapshot));
@@ -111,6 +194,8 @@ const GESTAO_OP_SYNC = (() => {
     const config = read();
     if (!config.sync_id || !config.access_key || pushing) return state();
     try {
+      if (temAlteracaoPendente(config)) await push();
+      if (temAlteracaoPendente()) return state();
       const result = await request({ action: 'pull', sync_id: config.sync_id, access_key: config.access_key });
       await applyRemote(result);
       write({ error: null });
@@ -148,11 +233,32 @@ const GESTAO_OP_SYNC = (() => {
     return result;
   }
 
-  function markChanged() {
+  function markChanged(event) {
     if (applyingRemote || !state().configured) return;
-    write({ local_updated_at: new Date().toISOString(), error: null });
-    clearTimeout(timer);
-    timer = setTimeout(() => push().catch(() => {}), 800);
+    const atual = read();
+    const detalhe = event.detail;
+    const anuncios = Array.isArray(atual.pending_anuncios) ? atual.pending_anuncios.slice() : [];
+    const criacoes = Array.isArray(atual.pending_criacoes) ? atual.pending_criacoes.slice() : [];
+    if (detalhe?.tipo === 'anuncio') {
+      const indice = anuncios.findIndex(item => item.colecao === detalhe.colecao && item.id === detalhe.id);
+      if (indice >= 0) anuncios.splice(indice, 1);
+      anuncios.push(detalhe);
+    }
+    if (detalhe?.tipo === 'nova_conta' &&
+        !criacoes.some(item => item.colecao === detalhe.colecao && item.id === detalhe.id)) {
+      criacoes.push(detalhe);
+    }
+    write({
+      local_updated_at: new Date().toISOString(),
+      local_revision: Number(atual.local_revision || 0) + 1,
+      pending: true,
+      pending_other: Boolean(atual.pending_other || !detalhe ||
+        (detalhe.tipo !== 'anuncio' && detalhe.tipo !== 'nova_conta')),
+      pending_anuncios: anuncios,
+      pending_criacoes: criacoes,
+      error: null,
+    });
+    agendarEnvio();
   }
 
   async function create() {
@@ -168,7 +274,8 @@ const GESTAO_OP_SYNC = (() => {
     if (parts.length !== 2 || !/^[a-f0-9-]{36}$/i.test(parts[0]) || !/^[a-f0-9]{64}$/i.test(parts[1])) {
       throw new Error('Código de pareamento inválido. Cole o código completo.');
     }
-    write({ sync_id: parts[0], access_key: parts[1], error: null });
+    write({ sync_id: parts[0], access_key: parts[1], pending: false, pending_other: false,
+      pending_anuncios: [], pending_criacoes: [], error: null });
     const result = await request({ action: 'pull', sync_id: parts[0], access_key: parts[1] });
     if (!result.snapshot) throw new Error('Ainda não há dados neste espaço de sincronização.');
     applyingRemote = true;
