@@ -202,6 +202,32 @@ button.stat-clicavel .sub { color: var(--primary); font-weight: 600; }
 .badge.Monetizada { background: #F1EAFE; color: #6C3FD1; }
 .badge.Ambos      { background: #E0F4F6; color: #00697A; }
 .badge.Nada       { background: #EFEFF1; color: var(--ink-2); }
+
+/* Situação do anúncio das contas do farm */
+.anuncio-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600;
+  padding: 3px 9px; border-radius: 100px;
+  margin-top: 4px;
+}
+.anuncio-status.anunciada { background: #E3F6E9; color: #1F8B4C; }
+.anuncio-status.pendente { background: #FFF3D8; color: #9A6300; }
+.anuncio-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.anuncio-action { border: 0; font-family: inherit; cursor: pointer; margin: 0; }
+.anuncio-control {
+  display: flex !important; align-items: center; gap: 10px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); cursor: pointer;
+}
+.anuncio-control input[type="checkbox"] {
+  appearance: auto; -webkit-appearance: checkbox;
+  width: 18px; height: 18px; margin: 0; padding: 0; flex: none;
+  accent-color: #25A55A;
+}
+.anuncio-control span { display: flex; flex-direction: column; gap: 2px; }
+.anuncio-control strong { color: var(--ink); font-size: 14px; }
+.anuncio-control small { color: var(--ink-2); font-size: 12px; font-weight: 400; }
+
 /* Estágios do farm */
 .badge.Crescendo  { background: #E3F6E9; color: #1F8B4C; }
 .badge.ShopAceito { background: #FFF3E0; color: #B26A00; }

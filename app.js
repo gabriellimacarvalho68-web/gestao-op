@@ -618,6 +618,7 @@ function contaItemHTML(c) {
 function farmItemHTML(f) {
   const inicial = f.username.replace(/^@/, '').charAt(0) || '?';
   const lote = f.lote_id ? DB.getFarmLote(f.lote_id) : null;
+  const anuncio = f.anunciada === true;
   return `
     <a class="conta-item" href="#/farm/conta/${f.id}">
       <div class="avatar">${esc(inicial)}</div>
@@ -625,6 +626,7 @@ function farmItemHTML(f) {
         <div class="username">@${esc(f.username.replace(/^@/, ''))}</div>
         <div class="meta">${lote ? esc(lote.nome) : 'Sem lote'}</div>
         <span class="badge ${esc(badgeSlug(f.status))}">${esc(f.status)}</span>
+        <span class="anuncio-status ${anuncio ? 'anunciada' : 'pendente'}"><span class="anuncio-dot"></span>${anuncio ? 'Anunciada' : 'Não anunciada'}</span>
       </div>
       <div class="fin">
         <div class="valores">${fmtData(f.data_inicio)}</div>
@@ -2507,6 +2509,16 @@ function renderFarmCadastro() {
         </div>
       </div>
       <div class="form-group">
+        <label>Status do anúncio</label>
+        <label class="anuncio-control">
+          <input name="anunciada" type="checkbox">
+          <span>
+            <strong>Conta anunciada</strong>
+            <small>Marque quando a conta já estiver com anúncio ativo.</small>
+          </span>
+        </label>
+      </div>
+      <div class="form-group">
         <label>Observações</label>
         <textarea name="observacoes" placeholder="Anotações sobre a conta"></textarea>
       </div>
@@ -2597,6 +2609,7 @@ function renderFarmCadastro() {
         senha_tiktok: f.get('senha_tiktok'),
         lote_id: f.get('lote_id') || null,
         status: f.get('status'),
+        anunciada: f.get('anunciada') === 'on',
         observacoes: f.get('observacoes'),
         email_reserva_id: emailReservaSelecionado ? emailReservaSelecionado.id : null,
       });
@@ -2622,6 +2635,7 @@ function renderFarmDetalhes(id) {
   const hist = DB.historicoDoFarm(id);
   const vendida = c.status === 'Vendida';
   const lote = c.lote_id ? DB.getFarmLote(c.lote_id) : null;
+  const anuncio = c.anunciada === true;
 
   $view.innerHTML = `
     <a class="back-link" href="#/farm/lista">
@@ -2664,6 +2678,7 @@ function renderFarmDetalhes(id) {
     <div class="card detail-rows">
       <div class="detail-row"><span class="k">Lote</span><span class="v">${lote ? `<a href="#/farm/lote/${lote.id}">${esc(lote.nome)}</a>` : 'Sem lote'}</span></div>
       <div class="detail-row"><span class="k">Estágio</span><span class="v"><span class="badge ${esc(badgeSlug(c.status))}">${esc(c.status)}</span></span></div>
+      <div class="detail-row"><span class="k">Anúncio</span><button type="button" class="anuncio-status anuncio-action ${anuncio ? 'anunciada' : 'pendente'}" id="btn-anuncio" aria-label="${anuncio ? 'Marcar como não anunciada' : 'Marcar como anunciada'}"><span class="anuncio-dot"></span>${anuncio ? 'Anunciada' : 'Não anunciada'}</button></div>
       <div class="detail-row"><span class="k">Início do farm</span><span class="v">${fmtData(c.data_inicio)}</span></div>
       <div class="detail-row"><span class="k">Vendida</span><span class="v">${vendida ? 'Sim' : 'Não'}</span></div>
       <div class="detail-row"><span class="k">Data da venda</span><span class="v">${fmtData(c.data_venda)}</span></div>
@@ -2771,6 +2786,14 @@ function renderFarmDetalhes(id) {
       });
       sheet.querySelector('#sheet-cancel').addEventListener('click', closeSheet);
     });
+  });
+
+  document.getElementById('btn-anuncio').addEventListener('click', () => {
+    try {
+      DB.atualizarFarm(id, { anunciada: !anuncio });
+      toast(anuncio ? 'Conta marcada como não anunciada' : 'Conta marcada como anunciada ✓');
+      renderFarmDetalhes(id);
+    } catch (err) { toast(err.message); }
   });
 
   // Excluir
@@ -2960,6 +2983,16 @@ function renderEditarFarm(id) {
         </div>
       </div>
       <div class="form-group">
+        <label>Status do anúncio</label>
+        <label class="anuncio-control">
+          <input name="anunciada" type="checkbox" ${c.anunciada === true ? 'checked' : ''}>
+          <span>
+            <strong>Conta anunciada</strong>
+            <small>Marque quando a conta já estiver com anúncio ativo.</small>
+          </span>
+        </label>
+      </div>
+      <div class="form-group">
         <label>Observações</label>
         <textarea name="observacoes">${esc(c.observacoes)}</textarea>
       </div>
@@ -2978,6 +3011,7 @@ function renderEditarFarm(id) {
         senha: f.get('senha'),
         senha_tiktok: f.get('senha_tiktok'),
         lote_id: f.get('lote_id') || null,
+        anunciada: f.get('anunciada') === 'on',
         observacoes: f.get('observacoes'),
       });
       toast('Alterações salvas ✓');

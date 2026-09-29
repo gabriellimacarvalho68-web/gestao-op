@@ -144,6 +144,7 @@ const DB = (() => {
           if (!Array.isArray(f.recursos)) f.recursos = [];
           if (f.lote_id === undefined) f.lote_id = null;
           if (f.senha_tiktok == null) f.senha_tiktok = '';
+          f.anunciada = f.anunciada === true || f.anunciada === 1 || f.anunciada === 'true';
         });
         // Garante que todo lote tenha as chaves esperadas (custo/faturamento)
         obj.farm_lotes.forEach(l => {
@@ -922,7 +923,7 @@ const DB = (() => {
     return data.farm.find(f => f.id === id) || null;
   }
 
-  function criarFarm({ username, plataforma, email, senha, senha_tiktok, custo_proprio, custo, status, observacoes, data_inicio, recursos, email_reserva_id, lote_id }) {
+  function criarFarm({ username, plataforma, email, senha, senha_tiktok, custo_proprio, custo, status, observacoes, data_inicio, recursos, email_reserva_id, lote_id, anunciada }) {
     username = String(username || '').trim();
     plataforma = String(plataforma || '').trim();
     if (!username) throw new Error('Username é obrigatório.');
@@ -962,6 +963,7 @@ const DB = (() => {
       preco_venda: null,
       lucro: 0,
       status: FARM_STATUS.includes(status) ? status : 'Crescendo',
+      anunciada: anunciada === true || anunciada === 1 || anunciada === 'true',
       observacoes: String(observacoes || '').trim(),
       data_inicio: data_inicio || now(),
       data_venda: null,
@@ -998,6 +1000,14 @@ const DB = (() => {
         if (v !== (f[k] || '')) { f[k] = v; mudou = true; }
       }
     });
+    if (campos.anunciada !== undefined) {
+      const anunciada = campos.anunciada === true || campos.anunciada === 1 || campos.anunciada === 'true';
+      if (anunciada !== (f.anunciada === true)) {
+        f.anunciada = anunciada;
+        mudou = true;
+        addFarmHistorico(id, 'Anúncio atualizado', anunciada ? 'Conta marcada como anunciada.' : 'Conta marcada como não anunciada.');
+      }
+    }
     // Vínculo a lote (aceita '' / null para desvincular)
     if (campos.lote_id !== undefined) {
       const novoLote = campos.lote_id || null;
@@ -1844,6 +1854,7 @@ const DB = (() => {
       if (!Array.isArray(f.recursos)) f.recursos = [];
       if (f.lote_id === undefined) f.lote_id = null;
       if (f.senha_tiktok == null) f.senha_tiktok = '';
+      f.anunciada = f.anunciada === true || f.anunciada === 1 || f.anunciada === 'true';
     });
     migrarCustoRecursosLegado(farm, farmRecursos);
     data = {
