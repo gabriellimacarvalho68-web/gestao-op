@@ -71,6 +71,40 @@ const GESTAO_OP_SYNC = (() => {
 
   function snapshot() { return JSON.parse(DB.exportar()); }
 
+  function protegerContraPerdaLocal(remoto, { criacoes = [], anuncios = [] } = {}) {
+    const local = snapshot();
+    const pendentes = itens => new Set(itens.map(item => `${item.colecao}:${item.id}`));
+    const criacoesPendentes = pendentes(criacoes);
+    const anunciosPendentes = pendentes(anuncios);
+    for (const colecao of ['contas', 'farm']) {
+      const locais = Array.isArray(local[colecao]) ? local[colecao] : [];
+      const recebidos = new Map((Array.isArray(remoto[colecao]) ? remoto[colecao] : [])
+        .map(conta => [conta.id, conta]));
+      for (const conta of locais) {
+        const recebida = recebidos.get(conta.id);
+        const chave = `${colecao}:${conta.id}`;
+        if (!recebida) {
+          if (criacoesPendentes.has(chave)) continue;
+          throw new Error(`Sincronização protegida: o servidor não contém a conta @${conta.username}. Os dados deste aparelho foram mantidos.`);
+        }
+        const localEm = Date.parse(conta.atualizado_em || conta.criado_em || '') || 0;
+        const remotoEm = Date.parse(recebida.atualizado_em || recebida.criado_em || '') || 0;
+        if (localEm > remotoEm && JSON.stringify(conta) !== JSON.stringify(recebida)) {
+          if (anunciosPendentes.has(chave)) {
+            const semAnuncio = item => {
+              const copia = { ...item };
+              delete copia.anunciada;
+              delete copia.atualizado_em;
+              return JSON.stringify(copia);
+            };
+            if (semAnuncio(conta) === semAnuncio(recebida)) continue;
+          }
+          throw new Error(`Sincronização protegida: o servidor tem uma versão antiga da conta @${conta.username}. Os dados deste aparelho foram mantidos.`);
+        }
+      }
+    }
+  }
+
   function temAlteracaoPendente(config = read()) {
     return config.pending === true || (config.pending == null && Boolean(
       config.local_updated_at && config.remote_updated_at &&
@@ -163,6 +197,7 @@ const GESTAO_OP_SYNC = (() => {
               Number(atual.local_revision || 0) !== revisao) throw error;
           const remotoEm = Date.parse(error.body.modified_at || '') || 0;
           dataEnvio = new Date(Math.max(Date.now(), remotoEm + 1)).toISOString();
+          protegerContraPerdaLocal(error.body.snapshot, { criacoes, anuncios });
           envio = reaplicarAlteracoes(error.body.snapshot, envio, criacoes, anuncios, dataEnvio);
           if (!envio) throw error;
           rebase = true;
@@ -182,6 +217,7 @@ const GESTAO_OP_SYNC = (() => {
     const localAt = String(config.local_updated_at || '');
     if (!result.snapshot || temAlteracaoPendente(config) ||
         (localAt && remoteAt && localAt > remoteAt)) return false;
+    protegerContraPerdaLocal(result.snapshot);
     applyingRemote = true;
     try {
       DB.importar(JSON.stringify(result.snapshot));
@@ -222,6 +258,7 @@ const GESTAO_OP_SYNC = (() => {
       public_url: link,
     });
     if (!result.snapshot) throw new Error('A planilha não devolveu dados para importar.');
+    protegerContraPerdaLocal(result.snapshot);
     applyingRemote = true;
     try {
       DB.importar(JSON.stringify(result.snapshot));
@@ -278,6 +315,7 @@ const GESTAO_OP_SYNC = (() => {
       pending_anuncios: [], pending_criacoes: [], error: null });
     const result = await request({ action: 'pull', sync_id: parts[0], access_key: parts[1] });
     if (!result.snapshot) throw new Error('Ainda não há dados neste espaço de sincronização.');
+    protegerContraPerdaLocal(result.snapshot);
     applyingRemote = true;
     try {
       DB.importar(JSON.stringify(result.snapshot));

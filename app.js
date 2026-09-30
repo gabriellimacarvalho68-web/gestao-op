@@ -437,6 +437,16 @@ function toast(msg) {
   $toast._t = setTimeout(() => $toast.classList.remove('show'), 2200);
 }
 
+let ultimoAvisoProtecao = null;
+window.addEventListener('gestao-op-sync-status', () => {
+  const erro = GESTAO_OP_SYNC.state().error;
+  if (erro && erro.startsWith('Sincronização protegida') && erro !== ultimoAvisoProtecao) {
+    ultimoAvisoProtecao = erro;
+    toast('Sincronização pausada para proteger seus dados. Veja Configurações.');
+  }
+  if (!erro) ultimoAvisoProtecao = null;
+});
+
 // Copia texto para a área de transferência (com fallback p/ navegadores antigos)
 function copiarTexto(texto) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2052,7 +2062,7 @@ function renderConfiguracoes() {
       <div class="setting-title">Sincronização entre celular e PC</div>
       ${sync.configured ? `
         <p class="sync-copy">${sync.error ? esc(sync.error) : 'Seus lançamentos são atualizados automaticamente nos aparelhos pareados.'}</p>
-        <div class="detail-row"><span class="k">Status</span><span class="v ${sync.error ? 'neg' : 'pos'}">${sync.error ? 'Aguardando conexão' : 'Ativa'}</span></div>
+        <div class="detail-row"><span class="k">Status</span><span class="v ${sync.error ? 'neg' : 'pos'}">${sync.error ? (sync.error.startsWith('Sincronização protegida') ? 'Pausada para proteger dados' : 'Aguardando conexão') : 'Ativa'}</span></div>
         <div class="detail-row"><span class="k">Última atualização</span><span class="v">${sync.syncedAt ? fmtDataHora(sync.syncedAt) : 'Enviando…'}</span></div>
         <div class="sync-actions">
           <button class="btn btn-secondary" id="btn-sync-now">Sincronizar agora</button>
