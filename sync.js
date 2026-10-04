@@ -105,6 +105,42 @@ const GESTAO_OP_SYNC = (() => {
     }
   }
 
+  function dataDoRegistro(item) {
+    return Date.parse(item?.atualizado_em || item?.criado_em || item?.usado_em || '') || 0;
+  }
+
+  function mesclarColecao(remota, local) {
+    const recebidos = Array.isArray(remota) ? remota : [];
+    const locais = Array.isArray(local) ? local : [];
+    const porId = new Map(recebidos.filter(item => item?.id).map(item => [item.id, item]));
+    let mudou = false;
+    for (const item of locais) {
+      if (!item?.id) continue;
+      const recebido = porId.get(item.id);
+      if (!recebido) {
+        porId.set(item.id, item);
+        mudou = true;
+      } else if (JSON.stringify(item) !== JSON.stringify(recebido) && dataDoRegistro(item) > dataDoRegistro(recebido)) {
+        porId.set(item.id, item);
+        mudou = true;
+      }
+    }
+    return { dados: Array.from(porId.values()), mudou };
+  }
+
+  function mesclarSnapshot(remoto, local) {
+    const dados = JSON.parse(JSON.stringify(remoto));
+    let mudou = false;
+    // Contas e histórico possuem UUID estável. A união por id impede que uma
+    // cópia atrasada remova uma conta; em colisões vence a edição mais recente.
+    for (const colecao of ['contas', 'historico', 'farm', 'farm_historico']) {
+      const fusao = mesclarColecao(remoto[colecao], local[colecao]);
+      dados[colecao] = fusao.dados;
+      mudou = mudou || fusao.mudou;
+    }
+    return { dados, mudou };
+  }
+
   function temAlteracaoPendente(config = read()) {
     return config.pending === true || (config.pending == null && Boolean(
       config.local_updated_at && config.remote_updated_at &&
@@ -197,8 +233,8 @@ const GESTAO_OP_SYNC = (() => {
               Number(atual.local_revision || 0) !== revisao) throw error;
           const remotoEm = Date.parse(error.body.modified_at || '') || 0;
           dataEnvio = new Date(Math.max(Date.now(), remotoEm + 1)).toISOString();
-          protegerContraPerdaLocal(error.body.snapshot, { criacoes, anuncios });
-          envio = reaplicarAlteracoes(error.body.snapshot, envio, criacoes, anuncios, dataEnvio);
+          const fusao = mesclarSnapshot(error.body.snapshot, envio);
+          envio = reaplicarAlteracoes(fusao.dados, envio, criacoes, anuncios, dataEnvio);
           if (!envio) throw error;
           rebase = true;
         }
@@ -214,14 +250,22 @@ const GESTAO_OP_SYNC = (() => {
   async function applyRemote(result) {
     const config = read();
     const remoteAt = String(result.modified_at || result.updated_at || '');
-    const localAt = String(config.local_updated_at || '');
-    if (!result.snapshot || temAlteracaoPendente(config) ||
-        (localAt && remoteAt && localAt > remoteAt)) return false;
-    protegerContraPerdaLocal(result.snapshot);
+    if (!result.snapshot || temAlteracaoPendente(config)) return false;
+    const fusao = mesclarSnapshot(result.snapshot, snapshot());
     applyingRemote = true;
     try {
-      DB.importar(JSON.stringify(result.snapshot));
-      write({ remote_updated_at: result.updated_at || remoteAt, local_updated_at: remoteAt, error: null });
+      DB.importar(JSON.stringify(fusao.dados));
+      if (fusao.mudou) {
+        const dataLocal = new Date(Math.max(Date.now(), (Date.parse(remoteAt) || 0) + 1)).toISOString();
+        write({
+          remote_updated_at: result.updated_at || remoteAt, local_updated_at: dataLocal,
+          local_revision: Number(config.local_revision || 0) + 1,
+          pending: true, pending_other: true, error: null,
+        });
+        agendarEnvio(0);
+      } else {
+        write({ remote_updated_at: result.updated_at || remoteAt, local_updated_at: remoteAt, error: null });
+      }
       return true;
     } finally { applyingRemote = false; }
   }

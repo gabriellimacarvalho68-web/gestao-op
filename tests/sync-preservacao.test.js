@@ -117,7 +117,7 @@ test('não substitui uma alteração local feita enquanto o pull aguardava respo
   assert.equal(env.config().pending, true);
 });
 
-test('não apaga cadastros locais quando o servidor devolve cópia sem eles', async () => {
+test('mescla cadastros locais quando o servidor devolve cópia sem eles', async () => {
   const local = snapshot([
     { id: 'a', username: 'primeira', criado_em: '2026-09-30T12:00:00.000Z' },
     { id: 'b', username: 'segunda', criado_em: '2026-09-30T12:01:00.000Z' },
@@ -128,12 +128,13 @@ test('não apaga cadastros locais quando o servidor devolve cópia sem eles', as
   const env = ambiente(local, [() => ({ status: 200, body: {
     snapshot: remoto, modified_at: '2026-09-30T12:30:00.000Z', updated_at: '2026-09-30T12:30:01.000Z',
   } })]);
-  await assert.rejects(env.sync.pull(), /Sincronização protegida/);
+  await env.sync.pull();
   assert.equal(env.dados().contas.length, 4);
-  assert.match(env.config().error, /@segunda/);
+  assert.equal(env.config().pending, true);
+  assert.equal(env.config().error, null);
 });
 
-test('não desfaz marcação de anúncio quando o servidor tem versão antiga da conta', async () => {
+test('mescla anúncio local quando o servidor tem versão antiga da conta', async () => {
   const local = snapshot([{ id: 'a', username: 'conta', anunciada: true,
     atualizado_em: '2026-09-30T12:20:00.000Z' }]);
   const remoto = snapshot([{ id: 'a', username: 'conta', anunciada: false,
@@ -141,8 +142,9 @@ test('não desfaz marcação de anúncio quando o servidor tem versão antiga da
   const env = ambiente(local, [() => ({ status: 200, body: {
     snapshot: remoto, modified_at: '2026-09-30T12:30:00.000Z', updated_at: '2026-09-30T12:30:01.000Z',
   } })]);
-  await assert.rejects(env.sync.pull(), /versão antiga/);
+  await env.sync.pull();
   assert.equal(env.dados().contas[0].anunciada, true);
+  assert.equal(env.config().pending, true);
 });
 
 test('recebe novas contas do servidor sem alterar as existentes', async () => {
@@ -157,18 +159,19 @@ test('recebe novas contas do servidor sem alterar as existentes', async () => {
   assert.equal(env.config().error, null);
 });
 
-test('conflito de envio não descarta conta local já confirmada anteriormente', async () => {
+test('conflito de envio mescla conta local já confirmada anteriormente', async () => {
   const local = snapshot([
     { id: 'antiga', username: 'salva', criado_em: '2026-09-29T12:00:00.000Z' },
     { id: 'nova', username: 'recente', criado_em: '2026-09-30T12:00:00.000Z' },
   ]);
   const remoto = snapshot([]);
-  const env = ambiente(local, [() => ({ status: 409, body: {
-    snapshot: remoto, modified_at: '2026-09-30T12:30:00.000Z',
-  } })]);
+  const env = ambiente(local, [
+    () => ({ status: 409, body: { snapshot: remoto, modified_at: '2026-09-30T12:30:00.000Z' } }),
+    () => ({ status: 200, body: { modified_at: '2026-09-30T12:30:01.000Z', updated_at: '2026-09-30T12:30:02.000Z' } }),
+  ]);
   env.evento({ tipo: 'nova_conta', colecao: 'contas', id: 'nova' });
-  await assert.rejects(env.sync.push(), /não contém a conta @salva/);
-  assert.equal(env.envios.length, 1);
+  await env.sync.push();
+  assert.equal(env.envios.length, 2);
   assert.equal(env.dados().contas.length, 2);
-  assert.equal(env.config().pending, true);
+  assert.equal(env.config().pending, false);
 });
