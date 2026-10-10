@@ -175,3 +175,28 @@ test('conflito de envio mescla conta local já confirmada anteriormente', async 
   assert.equal(env.dados().contas.length, 2);
   assert.equal(env.config().pending, false);
 });
+
+test('exclusão local impede que perfil antigo do servidor volte', async () => {
+  const remoto = snapshot([{ id: 'a', username: 'apagada', criado_em: '2026-10-10T10:00:00.000Z' }]);
+  const local = snapshot([]);
+  local.sync_exclusoes = [{ colecao: 'contas', id: 'a', excluido_em: '2026-10-10T11:00:00.000Z' }];
+  const env = ambiente(local, [() => ({ status: 200, body: {
+    snapshot: remoto, modified_at: '2026-10-10T11:05:00.000Z', updated_at: '2026-10-10T11:05:01.000Z',
+  } })]);
+  await env.sync.pull();
+  assert.equal(env.dados().contas.length, 0);
+  assert.equal(env.dados().sync_exclusoes.length, 1);
+  assert.equal(env.config().pending, true);
+});
+
+test('exclusão recebida do celular remove perfil antigo do PC', async () => {
+  const local = snapshot([{ id: 'a', username: 'apagada', criado_em: '2026-10-10T10:00:00.000Z' }]);
+  const remoto = snapshot([]);
+  remoto.sync_exclusoes = [{ colecao: 'contas', id: 'a', excluido_em: '2026-10-10T11:00:00.000Z' }];
+  const env = ambiente(local, [() => ({ status: 200, body: {
+    snapshot: remoto, modified_at: '2026-10-10T11:05:00.000Z', updated_at: '2026-10-10T11:05:01.000Z',
+  } })]);
+  await env.sync.pull();
+  assert.equal(env.dados().contas.length, 0);
+  assert.equal(env.config().pending, false);
+});

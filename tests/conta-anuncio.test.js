@@ -41,3 +41,11 @@ const antigo = JSON.parse(DB.exportar());
 delete antigo.contas[0].anunciada;
 DB.importar(JSON.stringify(antigo));
 assert.strictEqual(DB.getConta(antigo.contas[0].id).anunciada, false);
+
+const idExcluida = DB.getConta(anunciada.id).id;
+DB.excluirConta(idExcluida);
+const aposExcluir = JSON.parse(DB.exportar());
+assert.ok(
+  aposExcluir.sync_exclusoes.some(item => item.colecao === 'contas' && item.id === idExcluida),
+  'a exclusão precisa acompanhar o backup para chegar ao outro aparelho'
+);

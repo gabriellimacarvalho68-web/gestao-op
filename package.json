@@ -1,6 +1,6 @@
 {
   "name": "gestao-op",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "description": "Centro de operações sincronizado entre PC e celular",
   "main": "electron-main.js",
   "author": "Gestão OP",

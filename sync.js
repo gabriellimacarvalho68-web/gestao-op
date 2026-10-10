@@ -109,36 +109,65 @@ const GESTAO_OP_SYNC = (() => {
     return Date.parse(item?.atualizado_em || item?.criado_em || item?.usado_em || '') || 0;
   }
 
-  function mesclarColecao(remota, local) {
+  function chaveExclusao(item) { return `${item.colecao}:${item.id}`; }
+
+  function mesclarExclusoes(remotas, locais) {
+    const porChave = new Map();
+    let mudouLocal = false;
+    for (const item of [...(Array.isArray(remotas) ? remotas : []), ...(Array.isArray(locais) ? locais : [])]) {
+      if (!item || !['contas', 'farm'].includes(item.colecao) || !item.id || !Number.isFinite(Date.parse(item.excluido_em || ''))) continue;
+      const chave = chaveExclusao(item);
+      const atual = porChave.get(chave);
+      if (!atual || Date.parse(item.excluido_em) > Date.parse(atual.excluido_em)) porChave.set(chave, item);
+    }
+    const remotasPorChave = new Map((Array.isArray(remotas) ? remotas : []).map(item => [chaveExclusao(item), item]));
+    for (const item of Array.isArray(locais) ? locais : []) {
+      const remoto = remotasPorChave.get(chaveExclusao(item));
+      if (!remoto || Date.parse(item.excluido_em) > Date.parse(remoto.excluido_em || '')) mudouLocal = true;
+    }
+    return { dados: Array.from(porChave.values()), mudouLocal };
+  }
+
+  function mesclarColecao(remota, local, exclusoes, colecao) {
     const recebidos = Array.isArray(remota) ? remota : [];
     const locais = Array.isArray(local) ? local : [];
     const porId = new Map(recebidos.filter(item => item?.id).map(item => [item.id, item]));
-    let mudou = false;
+    const exclusoesPorId = new Map(exclusoes.filter(item => item.colecao === colecao).map(item => [item.id, item]));
+    let mudouLocal = false;
     for (const item of locais) {
       if (!item?.id) continue;
+      const exclusao = exclusoesPorId.get(item.id);
+      if (exclusao && dataDoRegistro(item) <= Date.parse(exclusao.excluido_em)) continue;
       const recebido = porId.get(item.id);
       if (!recebido) {
         porId.set(item.id, item);
-        mudou = true;
+        mudouLocal = true;
       } else if (JSON.stringify(item) !== JSON.stringify(recebido) && dataDoRegistro(item) > dataDoRegistro(recebido)) {
         porId.set(item.id, item);
-        mudou = true;
+        mudouLocal = true;
       }
     }
-    return { dados: Array.from(porId.values()), mudou };
+    const dados = Array.from(porId.values()).filter(item => {
+      const exclusao = exclusoesPorId.get(item.id);
+      return !exclusao || dataDoRegistro(item) > Date.parse(exclusao.excluido_em);
+    });
+    return { dados, mudouLocal };
   }
 
   function mesclarSnapshot(remoto, local) {
     const dados = JSON.parse(JSON.stringify(remoto));
-    let mudou = false;
-    // Contas e histórico possuem UUID estável. A união por id impede que uma
-    // cópia atrasada remova uma conta; em colisões vence a edição mais recente.
-    for (const colecao of ['contas', 'historico', 'farm', 'farm_historico']) {
-      const fusao = mesclarColecao(remoto[colecao], local[colecao]);
-      dados[colecao] = fusao.dados;
-      mudou = mudou || fusao.mudou;
-    }
-    return { dados, mudou };
+    const exclusoes = mesclarExclusoes(remoto.sync_exclusoes, local.sync_exclusoes);
+    dados.sync_exclusoes = exclusoes.dados;
+    const contas = mesclarColecao(remoto.contas, local.contas, exclusoes.dados, 'contas');
+    const farm = mesclarColecao(remoto.farm, local.farm, exclusoes.dados, 'farm');
+    dados.contas = contas.dados;
+    dados.farm = farm.dados;
+    const idsExcluidos = new Set(exclusoes.dados.map(chaveExclusao));
+    const historico = mesclarColecao(remoto.historico, local.historico, [], 'historico');
+    const farmHistorico = mesclarColecao(remoto.farm_historico, local.farm_historico, [], 'farm_historico');
+    dados.historico = historico.dados.filter(item => !idsExcluidos.has(`contas:${item.conta_id}`));
+    dados.farm_historico = farmHistorico.dados.filter(item => !idsExcluidos.has(`farm:${item.farm_id}`));
+    return { dados, mudou: exclusoes.mudouLocal || contas.mudouLocal || farm.mudouLocal || historico.mudouLocal || farmHistorico.mudouLocal };
   }
 
   function temAlteracaoPendente(config = read()) {
@@ -228,8 +257,7 @@ const GESTAO_OP_SYNC = (() => {
           const atual = read();
           const anuncios = Array.isArray(atual.pending_anuncios) ? atual.pending_anuncios : [];
           const criacoes = Array.isArray(atual.pending_criacoes) ? atual.pending_criacoes : [];
-          if (error.status !== 409 || !error.body?.snapshot || atual.pending_other ||
-              (!anuncios.length && !criacoes.length) ||
+          if (error.status !== 409 || !error.body?.snapshot ||
               Number(atual.local_revision || 0) !== revisao) throw error;
           const remotoEm = Date.parse(error.body.modified_at || '') || 0;
           dataEnvio = new Date(Math.max(Date.now(), remotoEm + 1)).toISOString();
@@ -264,7 +292,8 @@ const GESTAO_OP_SYNC = (() => {
         });
         agendarEnvio(0);
       } else {
-        write({ remote_updated_at: result.updated_at || remoteAt, local_updated_at: remoteAt, error: null });
+        write({ remote_updated_at: result.updated_at || remoteAt, local_updated_at: remoteAt,
+          pending: false, pending_other: false, error: null });
       }
       return true;
     } finally { applyingRemote = false; }

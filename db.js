@@ -123,6 +123,7 @@ const DB = (() => {
         // Retrocompatível: dados antigos não têm as chaves do farm
         obj.contas = obj.contas || [];
         obj.historico = obj.historico || [];
+        obj.sync_exclusoes = Array.isArray(obj.sync_exclusoes) ? obj.sync_exclusoes : [];
         obj.farm = obj.farm || [];
         obj.farm_historico = obj.farm_historico || [];
         obj.farm_recursos = obj.farm_recursos || [];
@@ -158,7 +159,7 @@ const DB = (() => {
         return obj;
       }
     } catch (e) { /* dados corrompidos: recomeça vazio */ }
-    return { contas: [], historico: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], farm_lotes: [], farm_custos_fixos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
+    return { contas: [], historico: [], sync_exclusoes: [], farm: [], farm_historico: [], farm_recursos: [], farm_custos_mensais: [], farm_lotes: [], farm_custos_fixos: [], ofertas: [], ofertas_historico: [], ofertas_grupos: [], emails: [], ttpost: ttpostVazio(), meta_anual: 10000 };
   }
 
   let data = load();
@@ -902,9 +903,15 @@ const DB = (() => {
   }
 
   function excluirConta(id) {
+    if (!data.contas.some(c => c.id === id)) return;
+    const excluido_em = now();
+    data.sync_exclusoes = data.sync_exclusoes.filter(item =>
+      !(item.colecao === 'contas' && item.id === id)
+    );
+    data.sync_exclusoes.push({ colecao: 'contas', id, excluido_em });
     data.contas = data.contas.filter(c => c.id !== id);
     data.historico = data.historico.filter(h => h.conta_id !== id);
-    persist();
+    persist({ tipo: 'exclusao', colecao: 'contas', id, excluido_em });
   }
 
   function listarContas({ busca, status, ordenar } = {}) {
@@ -1139,6 +1146,12 @@ const DB = (() => {
   }
 
   function excluirFarm(id) {
+    if (!data.farm.some(f => f.id === id)) return;
+    const excluido_em = now();
+    data.sync_exclusoes = data.sync_exclusoes.filter(item =>
+      !(item.colecao === 'farm' && item.id === id)
+    );
+    data.sync_exclusoes.push({ colecao: 'farm', id, excluido_em });
     const contaTtpost = ttpostContaDoFarm(id);
     if (contaTtpost && contaTtpost.active !== false) {
       enfileirarComandoTtpost('desativar_conta', contaTtpost, 'Conta excluída do Farm');
@@ -1147,7 +1160,7 @@ const DB = (() => {
     data.farm = data.farm.filter(f => f.id !== id);
     data.farm_historico = data.farm_historico.filter(h => h.farm_id !== id);
     recalcularCustosFarm(); // remover a conta muda a divisão dos recursos dela
-    persist();
+    persist({ tipo: 'exclusao', colecao: 'farm', id, excluido_em });
   }
 
   function listarFarm({ busca, status, ordenar } = {}) {
@@ -1828,6 +1841,7 @@ const DB = (() => {
       emails: data.emails,
       contas: data.contas,
       historico: data.historico,
+      sync_exclusoes: data.sync_exclusoes,
       farm: data.farm,
       farm_historico: data.farm_historico,
       farm_recursos: data.farm_recursos,
@@ -1856,6 +1870,9 @@ const DB = (() => {
     // Farm e Ofertas: opcionais (retrocompatível com backups das versões 1 e 2)
     const farm = Array.isArray(obj.farm) ? obj.farm : [];
     const farmHist = Array.isArray(obj.farm_historico) ? obj.farm_historico : [];
+    const syncExclusoes = Array.isArray(obj.sync_exclusoes) ? obj.sync_exclusoes.filter(item =>
+      item && ['contas', 'farm'].includes(item.colecao) && item.id && Number.isFinite(Date.parse(item.excluido_em || ''))
+    ) : [];
     const farmRecursos = Array.isArray(obj.farm_recursos) ? obj.farm_recursos : [];
     const farmCustosMensais = Array.isArray(obj.farm_custos_mensais) ? obj.farm_custos_mensais : [];
     const farmLotes = Array.isArray(obj.farm_lotes) ? obj.farm_lotes : [];
@@ -1885,7 +1902,7 @@ const DB = (() => {
     });
     migrarCustoRecursosLegado(farm, farmRecursos);
     data = {
-      contas: obj.contas, historico: obj.historico,
+      contas: obj.contas, historico: obj.historico, sync_exclusoes: syncExclusoes,
       farm, farm_historico: farmHist, farm_recursos: farmRecursos, farm_custos_mensais: farmCustosMensais,
       farm_lotes: farmLotes, farm_custos_fixos: farmCustosFixos,
       ofertas, ofertas_historico: ofertasHist, ofertas_grupos: ofertasGrupos,
